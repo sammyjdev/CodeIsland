@@ -196,9 +196,11 @@ public final class LiveStore: HookSink {
         reply(decision)
     }
 
-    public func liveSessions(profile: String?) -> [SessionSnapshot] {
+    /// Ids of the sessions `liveSessions(profile:)` would return, same order.
+    /// SessionSnapshot carries no id, so views that need one start here.
+    public func liveSessionIds(profile: String?) -> [String] {
         let currentNow = clock.now
-        var result: [SessionSnapshot] = []
+        var result: [(id: String, lastActivity: Date)] = []
 
         for (sessionId, session) in sessions {
             if let ended = endedAt[sessionId] {
@@ -211,10 +213,14 @@ public final class LiveStore: HookSink {
                     continue
                 }
             }
-            result.append(session)
+            result.append((sessionId, session.lastActivity))
         }
 
-        return result.sorted { $0.lastActivity > $1.lastActivity }
+        return result.sorted { $0.lastActivity > $1.lastActivity }.map(\.id)
+    }
+
+    public func liveSessions(profile: String?) -> [SessionSnapshot] {
+        liveSessionIds(profile: profile).compactMap { sessions[$0] }
     }
 
     private func schedulePurge(for sessionId: String) {

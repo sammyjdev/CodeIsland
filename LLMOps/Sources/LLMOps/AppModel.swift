@@ -30,12 +30,25 @@ final class AppModel {
         periodicTimer != nil
     }
 
+    let settings: LLMOpsSettings
+    let sounds: SoundManager
+    private(set) var server: HookServer?
+    var isServerListening: Bool { server?.isListening ?? false }
+
     init(userDefaults: UserDefaults = .standard) {
         let store = ProfileStore(userDefaults: userDefaults)
         let loaded = store.load()
+        let settings = LLMOpsSettings(userDefaults: userDefaults)
+        let sounds = SoundManager(settings: settings)
         self.profileStore = store
         self.profiles = loaded
-        self.live = LiveStore(profiles: loaded)
+        self.settings = settings
+        self.sounds = sounds
+        let liveStore = LiveStore(profiles: loaded)
+        liveStore.onSound = { [sounds] name in
+            sounds.handleEvent(name)
+        }
+        self.live = liveStore
     }
 
     // No deinit: AppModel lives for the whole app lifetime, and a nonisolated
@@ -89,6 +102,37 @@ final class AppModel {
 
     var visibleLive: [SessionSnapshot] {
         live.liveSessions(profile: selectedProfile)
+    }
+
+    private func serverConfig(from settings: LLMOpsSettings) -> HookServerConfig {
+        HookServerConfig(
+            autoApproveTools: Set(settings.autoApproveTools),
+            excludedCwdSubstrings: settings.excludedCwdSubstrings
+        )
+    }
+
+    func startServer() {
+        guard server == nil else { return }
+        let s = HookServer(sink: live, config: serverConfig(from: settings))
+        s.start()
+        self.server = s
+    }
+
+    func stopServer() {
+        server?.stop()
+        server = nil
+    }
+
+    func applySettingsToServer() {
+        server?.config = serverConfig(from: settings)
+    }
+
+    func settingsDidChange() {
+        applySettingsToServer()
+    }
+
+    func saveSettings() {
+        applySettingsToServer()
     }
 
     #if DEBUG

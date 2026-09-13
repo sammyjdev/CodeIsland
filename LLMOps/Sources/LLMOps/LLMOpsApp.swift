@@ -40,6 +40,8 @@ struct LLMOpsApp: App {
             .task {
                 model.rescan()
                 model.startPeriodicRescan()
+                model.startServer()
+                model.sounds.playBoot()
             }
         }
     }
