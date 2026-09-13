@@ -1,7 +1,29 @@
 import SwiftUI
 
+struct RouteView: View {
+    var model: AppModel
+
+    var body: some View {
+        switch model.route {
+        case .live:
+            LiveView()
+        case .history:
+            HistoryView()
+        case .analytics:
+            AnalyticsView()
+        case .settings:
+            SettingsView()
+        }
+    }
+}
+
 @main
 struct LLMOpsApp: App {
+    // Not @State: SwiftUI macros (SwiftUIMacros) are missing from the
+    // CommandLineTools toolchain. The App struct is created once, so a plain
+    // stored @Observable reference is enough.
+    private let model = AppModel()
+
     init() {
         FontRegistrar.registerBundledFonts()
     }
@@ -9,12 +31,15 @@ struct LLMOpsApp: App {
     var body: some Scene {
         WindowGroup("llmops") {
             NavigationSplitView {
-                Text("~ $ llmops")
-                    .font(.custom("JetBrainsMono-Medium", size: 12))
-                    .padding()
+                Sidebar(model: model)
             } detail: {
-                Text("// nothing here yet")
-                    .font(.custom("JetBrainsMono-Regular", size: 12))
+                RouteView(model: model)
+            }
+            .background(Theme.Colors.bg)
+            .preferredColorScheme(.dark)
+            .task {
+                model.rescan()
+                model.startPeriodicRescan()
             }
         }
     }
