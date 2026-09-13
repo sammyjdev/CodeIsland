@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "CodeIsland",
     platforms: [.macOS(.v14)],
+    products: [
+        // Exposed so the nested LLMOps package (LLMOps/Package.swift) can depend on it.
+        .library(name: "CodeIslandCore", targets: ["CodeIslandCore"]),
+    ],
     dependencies: [
         // Sparkle — auto-update framework. Pinned to 2.6+ for stable
         // SPUStandardUpdaterController + ed25519 signature verification.
