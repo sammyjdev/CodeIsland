@@ -6,13 +6,13 @@ struct RouteView: View {
     var body: some View {
         switch model.route {
         case .live:
-            LiveView()
+            LiveView(model: model)
         case .history:
-            HistoryView()
+            HistoryView(model: model)
         case .analytics:
-            AnalyticsView()
+            AnalyticsView(model: model)
         case .settings:
-            SettingsView()
+            SettingsView(model: model)
         }
     }
 }

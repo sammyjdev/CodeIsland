@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    var model: AppModel
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Eyebrow(text: "settings")

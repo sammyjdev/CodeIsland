@@ -180,9 +180,11 @@ struct HookServerTests {
             server.start()
             #expect(server.isListening == true)
 
+            // The socket is bound and chmod'ed asynchronously once the listener is
+            // ready, so wait for both the file and the final mode, not just the file.
             var st = stat()
-            for _ in 0..<50 {
-                if stat(socketPath, &st) == 0 { break }
+            for _ in 0..<100 {
+                if stat(socketPath, &st) == 0, (st.st_mode & 0o777) == 0o600 { break }
                 try await Task.sleep(nanoseconds: 10_000_000)
             }
             #expect(stat(socketPath, &st) == 0)
