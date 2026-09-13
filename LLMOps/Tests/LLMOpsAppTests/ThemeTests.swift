@@ -52,6 +52,10 @@ import Testing
             ".blur(",
             "\u{2014}",
             "\u{2013}",
+            // SwiftUI macro wrappers do not compile on the CommandLineTools
+            // toolchain (no SwiftUIMacros plugin); see the spec amendments.
+            "@State ",
+            "@Bindable ",
         ]
 
         var scannedCount = 0
