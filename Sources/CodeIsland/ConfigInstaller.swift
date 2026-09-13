@@ -269,13 +269,17 @@ struct ConfigInstaller {
                 ("PreToolUse", 5, false),
                 ("PostToolUse", 5, true),
                 ("PostToolUseFailure", 5, true),
-                ("PermissionRequest", 86400, false),
+                // ponytail: bounded from 86400 (24h) to 120s. On a wedged app the
+                // permission hook times out in 2min and Claude Code fails CLOSED
+                // (verified: timeout does not allow the tool call), instead of
+                // hanging the session for a day. Bump if 2min is too tight to click.
+                ("PermissionRequest", 120, false),
                 ("Stop", 5, true),
                 ("SubagentStart", 5, true),
                 ("SubagentStop", 5, true),
                 ("SessionStart", 5, false),
                 ("SessionEnd", 5, true),
-                ("Notification", 86400, false),
+                ("Notification", 120, false),
                 ("PreCompact", 5, true),
             ],
             versionedEvents: [
@@ -755,7 +759,9 @@ struct ConfigInstaller {
             // PreInvocation/PostInvocation are pass-through with no internal
             // meaning, so they're omitted. Timeout is in SECONDS (docs default 30).
             return [
-                ("PreToolUse", 86400, false),
+                // ponytail: bounded from 86400 (24h) to 120s, same rationale as the
+                // Claude Code gate — a wedged notch must not hang agy for a day.
+                ("PreToolUse", 120, false),
                 ("PostToolUse", 5, false),
                 ("Stop", 5, false),
             ]
@@ -1534,6 +1540,15 @@ struct ConfigInstaller {
         let quotedBridge = bridgeCommand.contains(" ") ? "\"\(bridgeCommand)\"" : bridgeCommand
         let bridgeSource = cli.bridgeSourceOverride ?? cli.source
         let baseCommand = "\(quotedBridge) --source \(bridgeSource)"
+
+        // Idempotency guard: if every target event already carries our hook, leave
+        // the file byte-for-byte untouched. Rewriting reorders JSON keys (Swift dict
+        // order is randomized per process), which changes the file hash and silently
+        // invalidates Codex's per-hash hook trust on every CodeIsland restart.
+        let alreadyInstalled = cli.events.allSatisfy { (event, _, _) in
+            (hooks[event] as? [[String: Any]])?.contains(where: { containsOurHook($0) }) ?? false
+        }
+        if alreadyInstalled { return true }
 
         for (event, timeout, _) in cli.events {
             var eventEntries = hooks[event] as? [[String: Any]] ?? []
