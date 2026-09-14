@@ -259,10 +259,9 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(store.liveSessions(profile: nil).count == 1)
     }
 
-    // 10. peerDisconnected("s1") with a pending permission resolves it .deny and marks the session ended.
-    @Test @MainActor func peerDisconnectedDeniesPendingAndMarksEnded() throws {
+    // 10. peerDisconnected("s1") resolves pending items with .deny, resets status, and keeps session live.
+    @Test @MainActor func peerDisconnectedDeniesPendingAndKeepsSessionLive() throws {
         let clock = FakeClock()
-        let now = clock.now
         let store = LiveStore(profiles: [], clock: clock)
 
         let reqJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}"#.utf8)
@@ -275,7 +274,9 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         store.peerDisconnected(sessionId: "s1")
         #expect(box.replies == [.deny])
         #expect(store.pending.isEmpty)
-        #expect(store.endedAt["s1"] == now)
+        #expect(store.endedAt["s1"] == nil)
+        #expect(store.sessions["s1"]?.status == .processing)
+        #expect(store.liveSessionIds(profile: nil).contains("s1"))
     }
 
     // 11. Decision.replyJSON for allow/deny equals the exact strings in the contract (compare as String(decoding:as:)); .answer("x\"y") produces valid JSON whose answer field decodes back to x"y.
@@ -306,5 +307,119 @@ final class FakeClock: LiveClock, @unchecked Sendable {
 
         let allSessions = store.liveSessions(profile: nil)
         #expect(allSessions.count == 2)
+    }
+
+    // F1.1: after permissionRequested then resolve(.allow), status is .processing;
+    // same after timeout fires. With two pending items on the same session, resolving one keeps .waitingApproval.
+    @Test @MainActor func statusLeavesWaitingApprovalOnResolveAndTimeout() throws {
+        let clock = FakeClock()
+        let now = clock.now
+        let store = LiveStore(profiles: [], clock: clock)
+
+        // 1. User decision: resolve(.allow) sets status to .processing and clears currentTool/toolDescription
+        let req1JSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"}}"#.utf8)
+        store.permissionRequested(event: try #require(HookEvent(from: req1JSON)), cwd: nil) { _ in }
+        #expect(store.sessions["s1"]?.status == .waitingApproval)
+        #expect(store.sessions["s1"]?.currentTool == "Bash")
+        #expect(store.sessions["s1"]?.toolDescription != nil)
+
+        let item1 = try #require(store.pending.first(where: { $0.sessionId == "s1" }))
+        store.resolve(id: item1.id, decision: .allow)
+        #expect(store.sessions["s1"]?.status == .processing)
+        #expect(store.sessions["s1"]?.currentTool == nil)
+        #expect(store.sessions["s1"]?.toolDescription == nil)
+
+        // 2. Timeout: fires after 110s, sets status to .processing and clears currentTool/toolDescription
+        let req2JSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s2","tool_name":"Bash","tool_input":{"command":"pwd"}}"#.utf8)
+        store.permissionRequested(event: try #require(HookEvent(from: req2JSON)), cwd: nil) { _ in }
+        #expect(store.sessions["s2"]?.status == .waitingApproval)
+
+        clock.fire(upTo: now.addingTimeInterval(110))
+        #expect(store.sessions["s2"]?.status == .processing)
+        #expect(store.sessions["s2"]?.currentTool == nil)
+        #expect(store.sessions["s2"]?.toolDescription == nil)
+
+        // 3. Two pending items on same session: resolving one keeps .waitingApproval
+        let req3aJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s3","tool_name":"Bash"}"#.utf8)
+        let req3bJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s3","tool_name":"Read"}"#.utf8)
+        store.permissionRequested(event: try #require(HookEvent(from: req3aJSON)), cwd: nil) { _ in }
+        store.permissionRequested(event: try #require(HookEvent(from: req3bJSON)), cwd: nil) { _ in }
+        #expect(store.pending.filter { $0.sessionId == "s3" }.count == 2)
+        #expect(store.sessions["s3"]?.status == .waitingApproval)
+
+        let item3a = try #require(store.pending.first(where: { $0.sessionId == "s3" }))
+        store.resolve(id: item3a.id, decision: .allow)
+        #expect(store.sessions["s3"]?.status == .waitingApproval)
+
+        let item3b = try #require(store.pending.first(where: { $0.sessionId == "s3" }))
+        store.resolve(id: item3b.id, decision: .deny)
+        #expect(store.sessions["s3"]?.status == .processing)
+        #expect(store.sessions["s3"]?.currentTool == nil)
+        #expect(store.sessions["s3"]?.toolDescription == nil)
+    }
+
+    // F1.3: updateProfiles recomputes profileOf for existing sessions with a cwd;
+    // handle with non-nil cwd always re-resolves profileOf.
+    @Test @MainActor func updateProfilesAndHandleCwdRecomputesProfile() throws {
+        let pessoal = Profile(id: "pessoal", name: "Pessoal", configDir: "/tmp/cfg-pessoal", pathPrefixes: [])
+        let afya = Profile(id: "afya", name: "Afya", configDir: "/tmp/cfg-afya", pathPrefixes: ["/tmp/afya"])
+        let store = LiveStore(profiles: [pessoal])
+
+        let e1JSON = Data(#"{"hook_event_name":"SessionStart","session_id":"s1"}"#.utf8)
+        store.handle(event: try #require(HookEvent(from: e1JSON)), cwd: "/tmp/afya/proj")
+        #expect(store.profileOf["s1"] == "pessoal")
+
+        store.updateProfiles([pessoal, afya])
+        #expect(store.profileOf["s1"] == "afya")
+
+        let work = Profile(id: "work", name: "Work", configDir: "/tmp/cfg-work", pathPrefixes: ["/tmp/work"])
+        store.updateProfiles([pessoal, afya, work])
+        let e2JSON = Data(#"{"hook_event_name":"UserPromptSubmit","session_id":"s1","prompt":"hi"}"#.utf8)
+        store.handle(event: try #require(HookEvent(from: e2JSON)), cwd: "/tmp/work/proj")
+        #expect(store.profileOf["s1"] == "work")
+    }
+
+    // F1.4: Permission sound fires exactly once per permissionRequested.
+    @Test @MainActor func permissionSoundFiresOnlyOnce() throws {
+        let store = LiveStore(profiles: [])
+        var playedSounds: [String] = []
+        store.onSound = { playedSounds.append($0) }
+
+        let reqJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}"#.utf8)
+        store.permissionRequested(event: try #require(HookEvent(from: reqJSON)), cwd: nil) { _ in }
+
+        #expect(playedSounds == ["PermissionRequest"])
+    }
+
+    // F1.5: Questions arriving as AskUserQuestion tool calls derive payload from event.toolInput["questions"].
+    @Test @MainActor func askUserQuestionToolCallYieldsQuestionPendingPermission() throws {
+        let store = LiveStore(profiles: [])
+        let json = Data(#"""
+        {
+            "hook_event_name": "PermissionRequest",
+            "session_id": "s1",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {
+                        "question": "Pick one",
+                        "header": "Choice",
+                        "options": [
+                            {"label": "a", "description": "..."},
+                            {"label": "b"}
+                        ]
+                    }
+                ]
+            }
+        }
+        """#.utf8)
+        let event = try #require(HookEvent(from: json))
+        store.questionAsked(event: event, cwd: nil) { _ in }
+
+        #expect(store.pending.count == 1)
+        let item = store.pending.first
+        #expect(item?.kind == .question)
+        #expect(item?.description == "Pick one")
+        #expect(item?.options == ["a", "b"])
     }
 }

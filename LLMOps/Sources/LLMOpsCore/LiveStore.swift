@@ -35,7 +35,7 @@ public final class LiveStore: HookSink {
     public private(set) var pending: [PendingPermission]       // oldest first
     public private(set) var profileOf: [String: String]        // sessionId -> profile id
     public private(set) var endedAt: [String: Date]            // sessionId -> when it ended
-    public var onSound: ((String) -> Void)?                   // sound name from SideEffect.playSound, plus "PermissionRequest" on each permission
+    public var onSound: ((String) -> Void)?                   // sound name from SideEffect.playSound
 
     private var profiles: [Profile]
     private let clock: LiveClock
@@ -54,6 +54,15 @@ public final class LiveStore: HookSink {
 
     public func updateProfiles(_ profiles: [Profile]) {
         self.profiles = profiles
+        for (sessionId, session) in sessions {
+            if let cwd = session.cwd {
+                if let profile = ProfileResolver.resolve(cwd: cwd, profiles: profiles) {
+                    profileOf[sessionId] = profile.id
+                } else {
+                    profileOf.removeValue(forKey: sessionId)
+                }
+            }
+        }
     }
 
     public func handle(event: HookEvent, cwd: String?) {
@@ -74,23 +83,27 @@ public final class LiveStore: HookSink {
             switch effect {
             case .playSound(let name):
                 onSound?(name)
-            case .removeSession(let id):
-                // If this is SessionEnd, retention/purge handles removal.
-                // For any other event emitting removeSession, remove immediately.
-                if eventName != "SessionEnd" {
-                    sessions.removeValue(forKey: id)
-                    profileOf.removeValue(forKey: id)
-                    endedAt.removeValue(forKey: id)
-                }
+            case .removeSession:
+                // The reducer only emits this for SessionEnd; removal is deferred
+                // to the retention purge below so the card lingers for 60s.
+                break
             case .tryMonitorSession, .stopMonitor, .enqueueCompletion, .setActiveSession:
                 break
             }
         }
 
+        if let cwd, !cwd.isEmpty {
+            sessions[sessionId]?.cwd = cwd
+        }
+
         let effectiveCwd = cwd ?? sessions[sessionId]?.cwd
-        if let effectiveCwd, profileOf[sessionId] == nil {
-            if let profile = ProfileResolver.resolve(cwd: effectiveCwd, profiles: profiles) {
-                profileOf[sessionId] = profile.id
+        if let effectiveCwd {
+            if cwd != nil || profileOf[sessionId] == nil {
+                if let profile = ProfileResolver.resolve(cwd: effectiveCwd, profiles: profiles) {
+                    profileOf[sessionId] = profile.id
+                } else {
+                    profileOf.removeValue(forKey: sessionId)
+                }
             }
         }
 
@@ -128,7 +141,6 @@ public final class LiveStore: HookSink {
         )
         pending.append(item)
         pendingReplies[id] = reply
-        onSound?("PermissionRequest")
 
         let cancel = clock.schedule(after: Self.permissionTimeout) { [weak self] in
             if Thread.isMainThread {
@@ -147,7 +159,27 @@ public final class LiveStore: HookSink {
     public func questionAsked(event: HookEvent, cwd: String?, reply: @escaping @Sendable (Decision) -> Void) {
         handle(event: event, cwd: cwd)
         let sessionId = event.sessionId ?? "default"
-        let payload = QuestionPayload.from(event: event)
+        sessions[sessionId]?.status = .waitingQuestion
+
+        let description: String?
+        let options: [String]?
+        if let payload = QuestionPayload.from(event: event) {
+            description = payload.question
+            options = payload.options
+        } else if let questions = event.toolInput?["questions"] as? [[String: Any]],
+                  let first = questions.first {
+            description = first["question"] as? String
+            if let rawOptions = first["options"] as? [[String: Any]] {
+                options = rawOptions.compactMap { $0["label"] as? String }
+            } else if let rawOptions = first["options"] as? [String] {
+                options = rawOptions
+            } else {
+                options = nil
+            }
+        } else {
+            description = nil
+            options = nil
+        }
 
         let id = UUID()
         let item = PendingPermission(
@@ -155,8 +187,8 @@ public final class LiveStore: HookSink {
             sessionId: sessionId,
             kind: .question,
             toolName: event.toolName,
-            description: payload?.question,
-            options: payload?.options,
+            description: description,
+            options: options,
             receivedAt: clock.now
         )
         pending.append(item)
@@ -176,13 +208,13 @@ public final class LiveStore: HookSink {
         pendingCancelHandles[id] = cancel
     }
 
+    /// Called when the hook connection closes (e.g. prompt answered in terminal).
+    /// Resolves pending items for this session with .deny, resets status to .processing
+    /// if waiting, and keeps the session running without setting endedAt.
     public func peerDisconnected(sessionId: String) {
-        endedAt[sessionId] = clock.now
-        schedulePurge(for: sessionId)
-
         let sessionPending = pending.filter { $0.sessionId == sessionId }
         for item in sessionPending {
-            resolve(id: item.id, decision: .deny)
+            resolve(id: item.id, decision: .deny)   // resolve resets the waiting status
         }
     }
 
@@ -192,8 +224,22 @@ public final class LiveStore: HookSink {
         }
         pendingCancelHandles[id]?()
         pendingCancelHandles.removeValue(forKey: id)
+        guard let item = pending.first(where: { $0.id == id }) else {
+            reply(decision)
+            return
+        }
+        let sessionId = item.sessionId
         pending.removeAll { $0.id == id }
         reply(decision)
+
+        if !pending.contains(where: { $0.sessionId == sessionId }) {
+            if let status = sessions[sessionId]?.status,
+               status == .waitingApproval || status == .waitingQuestion {
+                sessions[sessionId]?.status = .processing
+                sessions[sessionId]?.currentTool = nil
+                sessions[sessionId]?.toolDescription = nil
+            }
+        }
     }
 
     /// Ids of the sessions `liveSessions(profile:)` would return, same order.
