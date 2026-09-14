@@ -6,11 +6,11 @@ import LLMOpsCore
 
 @Suite struct AppModelTests {
     @Test func routeCases() {
-        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "settings"])
+        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "system", "settings"])
     }
 
     @Test func analysisRoute() {
-        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "settings"])
+        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "system", "settings"])
     }
 
     @Test @MainActor func initialDefaults() {

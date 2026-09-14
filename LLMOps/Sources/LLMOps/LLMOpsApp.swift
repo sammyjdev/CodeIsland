@@ -13,6 +13,8 @@ struct RouteView: View {
             AnalyticsView(model: model)
         case .analysis:
             AnalysisView(model: model)
+        case .system:
+            SystemView(model: model)
         case .settings:
             SettingsView(model: model)
         }
