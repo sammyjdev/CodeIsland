@@ -11,6 +11,8 @@ struct RouteView: View {
             HistoryView(model: model)
         case .analytics:
             AnalyticsView(model: model)
+        case .analysis:
+            AnalysisView(model: model)
         case .settings:
             SettingsView(model: model)
         }

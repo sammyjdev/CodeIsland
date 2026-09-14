@@ -8,6 +8,7 @@ enum Route: String, CaseIterable, Identifiable {
     case live
     case history
     case analytics
+    case analysis
     case settings
 
     var id: String { rawValue }
