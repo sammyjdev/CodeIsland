@@ -221,6 +221,26 @@ struct SettingsView: View {
                 .toggleStyle(.switch)
                 .tint(Theme.Colors.magenta)
 
+                HStack(spacing: 12) {
+                    Text("volume \(model.settings.soundVolume)")
+                        .font(Theme.Fonts.mono(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Slider(
+                        value: Binding(
+                            get: { Double(model.settings.soundVolume) },
+                            set: { model.settings.soundVolume = Int($0) }
+                        ),
+                        in: 0...100,
+                        step: 5
+                    )
+                    .tint(Theme.Colors.magenta)
+
+                    GhostButton("test") {
+                        model.sounds.preview("8bit_approval")
+                    }
+                }
+
                 Divider().overlay(Theme.Colors.line)
 
                 soundRow(
@@ -401,6 +421,54 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                HStack(spacing: 12) {
+                    Text("hide idle after (s)")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    let isInvalid = Int(state.hideIdleAfterText.trimmingCharacters(in: .whitespacesAndNewlines)) == nil
+                    TextField("300", text: Binding(
+                        get: { state.hideIdleAfterText },
+                        set: { newValue in
+                            state.hideIdleAfterText = newValue
+                            if let seconds = Int(newValue.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                                model.settings.hideIdleAfterSeconds = seconds
+                            }
+                        }
+                    ))
+                    .font(Theme.Fonts.mono(12))
+                    .foregroundStyle(isInvalid ? Theme.Colors.magentaDeep : Theme.Colors.text)
+                    .textFieldStyle(.plain)
+                    .frame(width: 56)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(Theme.Colors.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                            .stroke(Theme.Colors.line, lineWidth: 1)
+                    )
+                    .onSubmit {
+                        if let seconds = Int(state.hideIdleAfterText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                            model.settings.hideIdleAfterSeconds = seconds
+                            state.hideIdleAfterText = "\(model.settings.hideIdleAfterSeconds)"
+                        } else {
+                            state.hideIdleAfterText = "\(model.settings.hideIdleAfterSeconds)"
+                        }
+                    }
+                }
+
+                Toggle("bring to front on permission request", isOn: Binding(
+                    get: { model.settings.bringToFrontOnRequest },
+                    set: { model.settings.bringToFrontOnRequest = $0 }
+                ))
+                .font(Theme.Fonts.body(12))
+                .foregroundStyle(Theme.Colors.text)
+                .toggleStyle(.switch)
+                .tint(Theme.Colors.magenta)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -120,6 +120,7 @@ final class SettingsState: ObservableObject {
     @Published var quietStartText = ""
     @Published var quietEndText = ""
     @Published var endedRetentionText = ""
+    @Published var hideIdleAfterText = ""
 
     init(profiles: [Profile], settings: LLMOpsSettings) {
         self.draft = ProfilesDraft(profiles: profiles)
@@ -131,5 +132,6 @@ final class SettingsState: ObservableObject {
         self.quietStartText = Minutes.text(settings.quietHoursStartMinutes)
         self.quietEndText = Minutes.text(settings.quietHoursEndMinutes)
         self.endedRetentionText = "\(settings.endedRetentionSeconds)"
+        self.hideIdleAfterText = "\(settings.hideIdleAfterSeconds)"
     }
 }

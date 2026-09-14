@@ -206,4 +206,56 @@ import Testing
         let reloaded2 = LLMOpsSettings(userDefaults: defaults)
         #expect(reloaded2.endedRetentionSeconds == 0)
     }
+
+    // Required F7.2: newSettingsDefaultsAndClamps
+    @Test @MainActor func newSettingsDefaultsAndClamps() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.hideIdleAfterSeconds == 300)
+        #expect(settings.soundVolume == 60)
+        #expect(settings.bringToFrontOnRequest == true)
+
+        // Clamping hideIdleAfterSeconds
+        settings.hideIdleAfterSeconds = -1
+        #expect(settings.hideIdleAfterSeconds == 0)
+
+        settings.hideIdleAfterSeconds = 99999
+        #expect(settings.hideIdleAfterSeconds == 86400)
+
+        // Clamping soundVolume
+        settings.soundVolume = 150
+        #expect(settings.soundVolume == 100)
+
+        settings.soundVolume = -3
+        #expect(settings.soundVolume == 0)
+
+        // Persist across instances
+        settings.hideIdleAfterSeconds = 600
+        settings.soundVolume = 75
+        settings.bringToFrontOnRequest = false
+
+        let reloaded = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded.hideIdleAfterSeconds == 600)
+        #expect(reloaded.soundVolume == 75)
+        #expect(reloaded.bringToFrontOnRequest == false)
+    }
+
+    // Required F7.2: soundManagerAppliesVolume
+    @Test @MainActor func soundManagerAppliesVolume() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        settings.soundVolume = 25
+
+        let manager = SoundManager(settings: settings)
+        manager.audioEnabled = false
+
+        manager.handleEvent("SessionStart")
+        #expect(manager.lastVolume == 0.25)
+    }
 }

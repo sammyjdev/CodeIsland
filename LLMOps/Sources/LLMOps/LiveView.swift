@@ -9,7 +9,12 @@ struct LiveView: View {
         ScrollView {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let now = timeline.date
-                let rows = LiveViewModel.rows(from: model.live, profile: model.selectedProfile)
+                let (rows, hiddenIdle) = LiveViewModel.rows(
+                    from: model.live,
+                    profile: model.selectedProfile,
+                    now: now,
+                    hideIdleAfter: TimeInterval(model.settings.hideIdleAfterSeconds)
+                )
                 let pending = LiveViewModel.pending(from: model.live, profile: model.selectedProfile)
 
                 VStack(alignment: .leading, spacing: 16) {
@@ -23,6 +28,9 @@ struct LiveView: View {
                             GhostButton(title: "clear ended") {
                                 model.live.clearEnded()
                             }
+                        }
+                        if hiddenIdle > 0 {
+                            TagPill("\(hiddenIdle) idle hidden")
                         }
                         TagPill(
                             text: model.isServerListening ? "socket: listening" : "socket: down",

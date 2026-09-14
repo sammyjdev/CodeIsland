@@ -38,6 +38,7 @@ public final class LiveStore: HookSink {
     public private(set) var endedAt: [String: Date]            // sessionId -> when it ended
     public var onSound: ((String) -> Void)?                   // sound name from SideEffect.playSound
     public var onSessionEnd: ((String) -> Void)?              // sessionId, fired once per SessionEnd event
+    public var onPendingAdded: ((PendingPermission) -> Void)?
 
     private var profiles: [Profile]
     private let clock: LiveClock
@@ -168,6 +169,7 @@ public final class LiveStore: HookSink {
             }
         }
         pendingCancelHandles[id] = cancel
+        onPendingAdded?(item)
     }
 
     public func questionAsked(event: HookEvent, cwd: String?, reply: @escaping @Sendable (Decision) -> Void) {
@@ -220,6 +222,7 @@ public final class LiveStore: HookSink {
             }
         }
         pendingCancelHandles[id] = cancel
+        onPendingAdded?(item)
     }
 
     /// Called when the hook connection closes (e.g. prompt answered in terminal).
@@ -309,5 +312,9 @@ public final class LiveStore: HookSink {
             }
         }
         purgeCancelHandles[sessionId] = cancel
+    }
+
+    public func setLastActivityForTesting(_ sessionId: String, _ date: Date) {
+        sessions[sessionId]?.lastActivity = date
     }
 }

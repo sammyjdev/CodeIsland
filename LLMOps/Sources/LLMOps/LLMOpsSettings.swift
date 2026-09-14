@@ -17,6 +17,47 @@ public final class LLMOpsSettings {
         public static let autoApproveTools = "llmops.hooks.autoApproveTools" // [String], default []
         public static let excludedCwdSubstrings = "llmops.hooks.excludedCwdSubstrings" // [String], default []
         public static let endedRetentionSeconds = "llmops.live.endedRetentionSeconds" // default 60
+        public static let hideIdleAfterSeconds = "llmops.live.hideIdleAfterSeconds"   // default 300
+        public static let soundVolume = "llmops.sound.volume"                         // default 60
+        public static let bringToFrontOnRequest = "llmops.live.bringToFrontOnRequest" // default true
+    }
+
+    public var hideIdleAfterSeconds: Int {
+        get {
+            access(keyPath: \.hideIdleAfterSeconds)
+            return defaults.object(forKey: Key.hideIdleAfterSeconds) as? Int ?? 300
+        }
+        set {
+            let clamped = min(86400, max(0, newValue))
+            withMutation(keyPath: \.hideIdleAfterSeconds) {
+                defaults.set(clamped, forKey: Key.hideIdleAfterSeconds)
+            }
+        }
+    }
+
+    public var soundVolume: Int {
+        get {
+            access(keyPath: \.soundVolume)
+            return defaults.object(forKey: Key.soundVolume) as? Int ?? 60
+        }
+        set {
+            let clamped = min(100, max(0, newValue))
+            withMutation(keyPath: \.soundVolume) {
+                defaults.set(clamped, forKey: Key.soundVolume)
+            }
+        }
+    }
+
+    public var bringToFrontOnRequest: Bool {
+        get {
+            access(keyPath: \.bringToFrontOnRequest)
+            return defaults.object(forKey: Key.bringToFrontOnRequest) as? Bool ?? true
+        }
+        set {
+            withMutation(keyPath: \.bringToFrontOnRequest) {
+                defaults.set(newValue, forKey: Key.bringToFrontOnRequest)
+            }
+        }
     }
 
     public var endedRetentionSeconds: Int {

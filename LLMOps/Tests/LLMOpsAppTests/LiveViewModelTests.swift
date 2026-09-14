@@ -258,4 +258,75 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(StatusDot.color(for: .waitingApproval) == Theme.Colors.magentaBright)
         #expect(StatusDot.color(for: .waitingQuestion) == Theme.Colors.magentaBright)
     }
+
+    // Required F7.1: idleSessionsHideAfterThreshold
+    @Test @MainActor func idleSessionsHideAfterThreshold() throws {
+        let store = LiveStore(profiles: [])
+        let now = Date(timeIntervalSince1970: 1_000_000)
+
+        // Session 1: idle, lastActivity 100s ago
+        let s1Start = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s1"}"#.utf8)))
+        store.handle(event: s1Start, cwd: nil)
+        store.setLastActivityForTesting("s1", now.addingTimeInterval(-100))
+
+        // Session 2: idle, lastActivity 400s ago
+        let s2Start = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s2"}"#.utf8)))
+        store.handle(event: s2Start, cwd: nil)
+        store.setLastActivityForTesting("s2", now.addingTimeInterval(-400))
+
+        // hideIdleAfter: 300 -> visible 1, hiddenIdle 1
+        let result300 = LiveViewModel.rows(from: store, profile: nil, now: now, hideIdleAfter: 300)
+        #expect(result300.visible.count == 1)
+        #expect(result300.visible.first?.id == "s1")
+        #expect(result300.hiddenIdle == 1)
+
+        // hideIdleAfter: 0 -> visible 2, hiddenIdle 0
+        let result0 = LiveViewModel.rows(from: store, profile: nil, now: now, hideIdleAfter: 0)
+        #expect(result0.visible.count == 2)
+        #expect(result0.hiddenIdle == 0)
+
+        // a session in .running older than the threshold stays visible
+        let s3Start = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s3"}"#.utf8)))
+        store.handle(event: s3Start, cwd: nil)
+        let s3Pre = try #require(HookEvent(from: Data(#"{"hook_event_name":"PreToolUse","session_id":"s3","tool_name":"Bash"}"#.utf8)))
+        store.handle(event: s3Pre, cwd: nil)
+        store.setLastActivityForTesting("s3", now.addingTimeInterval(-500))
+
+        let resultWithRunning = LiveViewModel.rows(from: store, profile: nil, now: now, hideIdleAfter: 300)
+        #expect(resultWithRunning.visible.contains { $0.id == "s3" })
+        #expect(resultWithRunning.visible.count == 2)
+        #expect(resultWithRunning.hiddenIdle == 1)
+
+        // an ended session is not counted as hidden idle
+        let s4Start = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s4"}"#.utf8)))
+        store.handle(event: s4Start, cwd: nil)
+        let s4End = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionEnd","session_id":"s4"}"#.utf8)))
+        store.handle(event: s4End, cwd: nil)
+        store.setLastActivityForTesting("s4", now.addingTimeInterval(-600))
+
+        let resultWithEnded = LiveViewModel.rows(from: store, profile: nil, now: now, hideIdleAfter: 300)
+        #expect(resultWithEnded.visible.contains { $0.id == "s4" })
+        #expect(resultWithEnded.hiddenIdle == 1)
+    }
+
+    // Required F7.3: bringToFrontOnlyWhenEnabled
+    @Test @MainActor func bringToFrontOnlyWhenEnabled() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: defaults)
+        var count = 0
+        model.activator = { count += 1 }
+
+        let reqJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}"#.utf8)
+        let event = try #require(HookEvent(from: reqJSON))
+
+        model.live.permissionRequested(event: event, cwd: nil) { _ in }
+        #expect(count == 1)
+
+        model.settings.bringToFrontOnRequest = false
+        model.live.permissionRequested(event: event, cwd: nil) { _ in }
+        #expect(count == 1)
+    }
 }

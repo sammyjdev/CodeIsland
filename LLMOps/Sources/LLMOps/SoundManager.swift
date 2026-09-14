@@ -35,6 +35,9 @@ public final class SoundManager {
     /// For tests: the last sound name that would have been played, or nil.
     public private(set) var lastPlayed: String?
 
+    /// For tests: the last volume set for playback, or nil.
+    public private(set) var lastVolume: Float?
+
     /// For tests: when false, resolve the file and record `lastPlayed` without touching NSSound.
     public var audioEnabled: Bool
 
@@ -92,10 +95,13 @@ public final class SoundManager {
     private func play(_ name: String) {
         guard let url = soundURL(for: name) else { return }
         lastPlayed = name
+        let volume = Float(settings.soundVolume) / 100.0
+        lastVolume = volume
         guard audioEnabled else { return }
         let sound = soundCache[name] ?? NSSound(contentsOf: url, byReference: false)
         if let sound {
             soundCache[name] = sound
+            sound.volume = volume
             if sound.isPlaying { sound.stop() }
             sound.play()
         }

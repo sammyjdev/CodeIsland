@@ -491,4 +491,29 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(store.sessions["s1"] == nil)
         #expect(store.endedAt["s1"] == nil)
     }
+
+    // Required F7.3: onPendingAddedFiresForPermissionAndQuestion
+    @Test @MainActor func onPendingAddedFiresForPermissionAndQuestion() throws {
+        let store = LiveStore(profiles: [])
+        var added: [PendingPermission] = []
+        store.onPendingAdded = { added.append($0) }
+
+        let reqJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}"#.utf8)
+        let reqEvent = try #require(HookEvent(from: reqJSON))
+        store.permissionRequested(event: reqEvent, cwd: nil) { _ in }
+
+        #expect(added.count == 1)
+        #expect(added.first?.kind == .permission)
+        #expect(added.first?.sessionId == "s1")
+        #expect(added.first?.toolName == "Bash")
+
+        let qJSON = Data(#"{"hook_event_name":"Notification","session_id":"s2","question":"Proceed?","options":["yes","no"]}"#.utf8)
+        let qEvent = try #require(HookEvent(from: qJSON))
+        store.questionAsked(event: qEvent, cwd: nil) { _ in }
+
+        #expect(added.count == 2)
+        #expect(added.last?.kind == .question)
+        #expect(added.last?.sessionId == "s2")
+        #expect(added.last?.description == "Proceed?")
+    }
 }

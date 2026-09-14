@@ -34,11 +34,23 @@ enum LiveViewModel {
 
     /// Rows for `store.liveSessions(profile:)`, mapped 1:1, order preserved (lastActivity desc).
     @MainActor
-    static func rows(from store: LiveStore, profile: String?) -> [LiveRow] {
-        var rows: [LiveRow] = []
+    static func rows(
+        from store: LiveStore,
+        profile: String?,
+        now: Date,
+        hideIdleAfter: TimeInterval
+    ) -> (visible: [LiveRow], hiddenIdle: Int) {
+        var visible: [LiveRow] = []
+        var hiddenIdle = 0
 
         for sessionId in store.liveSessionIds(profile: profile) {
             guard let snapshot = store.sessions[sessionId] else { continue }
+
+            let isEnded = store.endedAt[sessionId] != nil
+            if hideIdleAfter > 0 && snapshot.status == .idle && !isEnded && now.timeIntervalSince(snapshot.lastActivity) >= hideIdleAfter {
+                hiddenIdle += 1
+                continue
+            }
 
             let project: String
             if let cwd = snapshot.cwd {
@@ -56,9 +68,8 @@ enum LiveViewModel {
             }
 
             let rowProfile = store.profileOf[sessionId]
-            let isEnded = store.endedAt[sessionId] != nil
 
-            rows.append(LiveRow(
+            visible.append(LiveRow(
                 id: sessionId,
                 title: title,
                 project: project,
@@ -74,7 +85,13 @@ enum LiveViewModel {
             ))
         }
 
-        return rows
+        return (visible: visible, hiddenIdle: hiddenIdle)
+    }
+
+    /// Rows for `store.liveSessions(profile:)`, mapped 1:1, order preserved (lastActivity desc).
+    @MainActor
+    static func rows(from store: LiveStore, profile: String?) -> [LiveRow] {
+        rows(from: store, profile: profile, now: Date(), hideIdleAfter: 0).visible
     }
 
     /// Pending items for the selected profile (nil = all), oldest first; an item

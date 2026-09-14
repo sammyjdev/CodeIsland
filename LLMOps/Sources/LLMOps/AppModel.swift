@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import CodeIslandCore
@@ -14,6 +15,11 @@ enum Route: String, CaseIterable, Identifiable {
 
 @MainActor @Observable
 final class AppModel {
+    var activator: () -> Void = {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
+    }
+
     let profileStore: ProfileStore
     private(set) var profiles: [Profile]
     var selectedProfile: String?
@@ -60,6 +66,14 @@ final class AppModel {
         live.onSessionEnd = { [weak self] _ in
             self?.rescan()
         }
+        live.onPendingAdded = { [weak self] _ in
+            self?.bringToFrontIfEnabled()
+        }
+    }
+
+    func bringToFrontIfEnabled() {
+        guard settings.bringToFrontOnRequest else { return }
+        activator()
     }
 
     // No deinit: AppModel lives for the whole app lifetime, and a nonisolated
