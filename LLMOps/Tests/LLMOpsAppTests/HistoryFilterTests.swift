@@ -367,5 +367,14 @@ import LLMOpsCore
         #expect(Period.d90.label == "90d")
         #expect(Period.all.label == "all")
     }
+
+    // 9. HistoryFormat.bytes: 512 -> "512 B", 12_288 -> "12 KB", 3_565_158 -> "3.4 MB", 356_515_840 -> "340 MB", 1_288_490_189 -> "1.2 GB".
+    @Test func bytesFormatting() {
+        #expect(HistoryFormat.bytes(512) == "512 B")
+        #expect(HistoryFormat.bytes(12_288) == "12 KB")
+        #expect(HistoryFormat.bytes(3_565_158) == "3.4 MB")
+        #expect(HistoryFormat.bytes(356_515_840) == "340 MB")
+        #expect(HistoryFormat.bytes(1_288_490_189) == "1.2 GB")
+    }
 }
 

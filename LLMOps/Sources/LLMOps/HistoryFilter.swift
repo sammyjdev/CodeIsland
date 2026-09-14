@@ -208,6 +208,34 @@ enum HistoryFormat {
             return "\(minutes)m \(String(format: "%02d", secs))s"
         }
     }
+
+    /// 1024 based. >= 1 GB: "1.2 GB"; >= 1 MB: "340 MB" (one decimal below 10 MB: "3.4 MB"); >= 1 KB: "12 KB"; else "512 B".
+    static func bytes(_ n: UInt64) -> String {
+        let gbThreshold: UInt64 = 1024 * 1024 * 1024
+        let tenMbThreshold: UInt64 = 10 * 1024 * 1024
+        let mbThreshold: UInt64 = 1024 * 1024
+        let kbThreshold: UInt64 = 1024
+
+        if n >= gbThreshold {
+            let val = Double(n) / Double(gbThreshold)
+            let rounded = (val * 10.0).rounded() / 10.0
+            return String(format: "%.1f GB", rounded)
+        } else if n >= tenMbThreshold {
+            let val = Double(n) / Double(mbThreshold)
+            let rounded = val.rounded()
+            return "\(Int(rounded)) MB"
+        } else if n >= mbThreshold {
+            let val = Double(n) / Double(mbThreshold)
+            let rounded = (val * 10.0).rounded() / 10.0
+            return String(format: "%.1f MB", rounded)
+        } else if n >= kbThreshold {
+            let val = Double(n) / Double(kbThreshold)
+            let rounded = val.rounded()
+            return "\(Int(rounded)) KB"
+        } else {
+            return "\(n) B"
+        }
+    }
 }
 
 enum HistoryDateFormatter {
