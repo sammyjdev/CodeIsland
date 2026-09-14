@@ -283,3 +283,44 @@ public enum SystemSampler {
 
 Out of scope: disk, network, alerts, killing processes, persisting history, parent process lookup.
 - S5 landed as two commits (109342a core, d2ccccf screen), 180 tests in 17 suites. Host added `mach_port_deallocate` for the `mach_host_self` port in `MachProbe.read`. Battery `cycleCount` and `healthPercent` stay nil in v1.
+
+## S6. Quotas tab: usage limits of four subscriptions (approved 2026-09-14)
+
+Owner request: monitor the usage limits of Claude (personal), Codex, Antigravity and Z.ai. This revises the v1 "no network" rule: the app now performs two read only GETs (Anthropic, Z.ai) with the user's own credentials, nothing else leaves the machine.
+
+Sources, all verified live on 2026-09-14:
+
+- Claude: OAuth access token from the Keychain item `Claude Code-credentials` (JSON, `claudeAiOauth.accessToken`, read through `/usr/bin/security find-generic-password -s "Claude Code-credentials" -w`), GET `https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer` and `anthropic-beta: oauth-2025-04-20`. Fields: `five_hour.utilization`, `five_hour.resets_at`, `seven_day.utilization`, `seven_day.resets_at`.
+- Codex: newest `rollout-*.jsonl` under `~/.codex/sessions` whose last `"rate_limits"` has a non null `primary`: `primary.used_percent`, `primary.window_minutes`, `primary.resets_at` (epoch seconds), same for `secondary`, plus `plan_type`. Files whose rate_limits carry only `credits` (limit_id "premium") are skipped; at most 30 newest files are scanned.
+- Antigravity: subprocess `antigravity-usage quota --json` (node script under nvm; PATH gets the script's directory prepended). `models[]` with `label`, `modelId`, `remainingPercentage` (0...1), `resetTime` (ISO 8601), `isAutocompleteOnly`; `email`.
+- Z.ai: key from `~/.local/share/opencode/auth.json` at `["zai-coding-plan"]["key"]`, GET `https://api.z.ai/api/monitor/usage/quota/limit` with `Authorization: Bearer`. `data.level` and `data.limits[]` with `type` (`TOKENS_LIMIT` kept, others skipped), `unit` (3 = 5h, 6 = 7d), `percentage`, `nextResetTime` (epoch ms).
+
+Core contract (`Sources/LLMOpsCore/Quotas.swift`):
+
+```swift
+public enum QuotaProviderID: String, CaseIterable, Sendable, Codable { case claude, codex, antigravity, zai }
+public struct QuotaWindow: Equatable, Sendable, Codable { public let label: String; public let usedPercent: Double; public let resetsAt: Date? }
+public struct QuotaSnapshot: Equatable, Sendable {
+    public let provider: QuotaProviderID; public let windows: [QuotaWindow]; public let fetchedAt: Date; public let detail: String?
+    public var worstUsedPercent: Double?   // max over windows
+}
+public enum QuotaError: Error, Equatable { case missingCredential(String); case network(String); case badPayload(String); case notFound(String); case subprocess(String) }
+public protocol QuotaProvider: Sendable { var id: QuotaProviderID { get }; func fetch(now: Date) async throws -> QuotaSnapshot }
+```
+
+Parsers are pure and separately testable (`ClaudeQuotaParser`, `CodexQuotaParser`, `AntigravityQuotaParser`, `ZaiQuotaParser`); providers wrap them with injectable loaders (token loader, sessions directory, subprocess runner, URLSession).
+
+Screen: `Route.quotas` between `system` and `settings`. `QuotaState` holds one `Result<QuotaSnapshot, Error>` per provider, refreshes every 300 s while the app runs (not only while visible, so the sidebar line stays current) and on a `refresh` button. Four `EvidenceCard`s in a 2x2 grid: provider name as eyebrow, one row per window with label, a horizontal bar (magenta below 80%, magentaBright at or above), `NN%` and `resets in 2h 10m`; detail line (plan, email) in mono dim; an error card shows the mapped error in magenta mono without hiding the other three. Antigravity lists only Gemini 3.x and Claude models (not autocomplete), and its hero number is the worst of them. Sidebar: under the route list, a mono line `claude 53  codex 82  agy 24  zai 22` with the 5 h (or worst) used percent, dim, `--` when unknown.
+
+Settings: `antigravityUsagePath` (default: newest `~/.nvm/versions/node/*/bin/antigravity-usage`, else `/usr/local/bin/antigravity-usage`), `zaiAuthPath` (default `~/.local/share/opencode/auth.json`), both as text fields in a `quotas` card.
+
+## S7. Notch popup for permission and question requests (approved 2026-09-14)
+
+Owner request: stop activating the app on requests; show a popup at the notch, like the original CodeIsland, with the options.
+
+- `NotchPanelController` (`Sources/LLMOps/NotchPanel.swift`, `@MainActor`): one borderless `NSPanel` with `.nonactivatingPanel`, `isFloatingPanel`, level `CGWindowLevelForKey(.mainMenuWindow) + 2`, `collectionBehavior [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]`, `hidesOnDeactivate false`, clear background, no shadow. Content: `NSHostingView` of `NotchPanelView(model:)`, a `VStack` of `PermissionCard`s for `model.live.pending` (max 3, oldest first) inside a surface colored rounded container 420 wide. Position: horizontally centered on the screen that has a notch (`safeAreaInsets.top > 0`), else `NSScreen.main`; top edge at `screen.frame.maxY - topInset`, where `topInset` is `safeAreaInsets.top` on notch screens and the menu bar height (`frame.maxY - visibleFrame.maxY`) otherwise. Re-positioned on `didChangeScreenParametersNotification`.
+- Visibility follows `model.live.pending.isEmpty` through `withObservationTracking` re-armed on every change (same pattern as CodeIsland's `armSessionObservation`): `orderFrontRegardless` when non empty, `orderOut` when empty. Never `activate`s the app.
+- Settings: `bringToFrontOnRequest: Bool` is replaced by `requestPresentation: RequestPresentation` (`enum: String { notch, front, none }`, key `llmops.live.requestPresentation`, default `notch`; a legacy stored `bringToFrontOnRequest == false` maps to `none` when no new key exists). `AppModel.presentRequest()` switches: `.notch` does nothing extra (the controller reacts to `pending`), `.front` calls `activator()`, `.none` nothing. Settings UI: a segmented picker `notch popup / bring app to front / nothing` in the `live` card replacing the toggle.
+- Tests: `NotchPanelControllerTests` with an injected `LiveStore` (pending added via the store API): panel `isVisible` becomes true after a pending item, false after `resolve`; frame origin x equals the screen center minus half the width; the panel style mask contains `.nonactivatingPanel`. `LLMOpsSettings` tests for the enum default and the legacy mapping. `AppModelTests`: `.front` calls the injected activator, `.notch` and `.none` do not.
+
+Out of scope: notch for metrics or sounds, per provider multiple accounts, quota alerts.
