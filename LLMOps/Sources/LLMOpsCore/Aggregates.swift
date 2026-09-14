@@ -31,7 +31,7 @@ public struct BucketUsage: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct ToolUsage: Identifiable, Equatable, Sendable {
+public struct ToolUsage: Identifiable, Equatable, Sendable, Codable {
     public var id: String { name }
     public let name: String
     public let calls: Int
@@ -46,7 +46,7 @@ public struct ToolUsage: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct UsageShape: Equatable, Sendable {
+public struct UsageShape: Equatable, Sendable, Codable {
     public let sessions: Int
     public let turns: Int
     public let toolCalls: Int
