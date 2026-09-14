@@ -33,7 +33,7 @@ public struct BucketUsage: Identifiable, Equatable, Sendable {
 
 public enum Aggregates {
     /// One entry per day for the last `days` days ending at `now` (inclusive),
-    /// oldest first, zero-filled for days without sessions. A session counts on
+    /// oldest first, zero-filled for days without turns. A turn counts on
     /// the day of its `startedAt`.
     public static func perDay(_ sessions: [Session], days: Int, now: Date, calendar: Calendar) -> [DayUsage] {
         guard days > 0 else { return [] }
@@ -41,23 +41,28 @@ public enum Aggregates {
         var result: [DayUsage] = []
         result.reserveCapacity(days)
 
+        var turnsByDay: [Date: (usage: ClaudeUsageTotals, costUSD: Double)] = [:]
+        for session in sessions {
+            for turn in session.turns {
+                let day = calendar.startOfDay(for: turn.startedAt)
+                var current = turnsByDay[day] ?? (ClaudeUsageTotals(), 0.0)
+                current.usage = current.usage + turn.usage
+                let model = turn.model ?? session.model
+                current.costUSD += CostTable.estimate(turn.usage, model: model).usd
+                turnsByDay[day] = current
+            }
+        }
+
         for i in 0..<days {
             let offset = -(days - 1 - i)
-            guard let dayStart = calendar.date(byAdding: .day, value: offset, to: todayStart) else {
+            guard let rawDayStart = calendar.date(byAdding: .day, value: offset, to: todayStart) else {
                 continue
             }
+            let dayStart = calendar.startOfDay(for: rawDayStart)
 
-            let sessionsOnDay = sessions.filter { session in
-                calendar.startOfDay(for: session.startedAt) == dayStart
-            }
-
-            var dayUsage = ClaudeUsageTotals()
-            var dayCost = 0.0
-
-            for s in sessionsOnDay {
-                dayUsage = dayUsage + s.usage
-                dayCost += sessionCost(s).usd
-            }
+            let entry = turnsByDay[dayStart] ?? (ClaudeUsageTotals(), 0.0)
+            let dayUsage = entry.usage
+            let dayCost = entry.costUSD
 
             let denom = Double(dayUsage.inputTokens + dayUsage.cacheReadTokens + dayUsage.cacheCreationTokens)
             let cacheReadRatio = denom > 0 ? Double(dayUsage.cacheReadTokens) / denom : 0.0
@@ -150,10 +155,16 @@ public enum Aggregates {
 
     public static func todayCost(_ sessions: [Session], now: Date, calendar: Calendar) -> Double {
         let todayStart = calendar.startOfDay(for: now)
-        let sessionsToday = sessions.filter {
-            calendar.startOfDay(for: $0.startedAt) == todayStart
+        var totalUSD = 0.0
+        for session in sessions {
+            for turn in session.turns {
+                if calendar.startOfDay(for: turn.startedAt) == todayStart {
+                    let model = turn.model ?? session.model
+                    totalUSD += CostTable.estimate(turn.usage, model: model).usd
+                }
+            }
         }
-        return sessionsToday.reduce(0.0) { $0 + sessionCost($1).usd }
+        return totalUSD
     }
 
     /// ISO week (Monday start) containing `now`.
@@ -163,9 +174,15 @@ public enum Aggregates {
         guard let interval = isoCalendar.dateInterval(of: .weekOfYear, for: now) else {
             return 0.0
         }
-        let sessionsThisWeek = sessions.filter {
-            $0.startedAt >= interval.start && $0.startedAt < interval.end
+        var totalUSD = 0.0
+        for session in sessions {
+            for turn in session.turns {
+                if turn.startedAt >= interval.start && turn.startedAt < interval.end {
+                    let model = turn.model ?? session.model
+                    totalUSD += CostTable.estimate(turn.usage, model: model).usd
+                }
+            }
         }
-        return sessionsThisWeek.reduce(0.0) { $0 + sessionCost($1).usd }
+        return totalUSD
     }
 }

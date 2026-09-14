@@ -94,7 +94,7 @@ struct CostAndAggregatesTests {
         #expect(sessionEstimate.isFallback == false)
     }
 
-    // 4. perDay(days: 3) for sessions on day D-2 and D returns 3 entries oldest first with the middle one zero-filled; cacheReadRatio is 0 for the empty day and correct (cacheRead / (input + cacheRead + cacheWrite)) for a filled day.
+    // 4. perDay(days: 3) for turns on day D-2 and D returns 3 entries oldest first with the middle one zero-filled; cacheReadRatio is 0 for the empty day and correct (cacheRead / (input + cacheRead + cacheWrite)) for a filled day.
     @Test func perDayReturnsZeroFilledEntriesAndCorrectCacheReadRatio() {
         let cal = utcCalendar
         let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 14, minute: 0, second: 0))!
@@ -157,6 +157,75 @@ struct CostAndAggregatesTests {
         // Current day D
         #expect(days[2].day == dayDStart)
         #expect(days[2].usage.inputTokens == 50)
+    }
+
+    // A session started on day D with turns on D and D+2 -> perDay(days: 3) puts
+    // the first turn's usage on D, zero on D+1, the second turn's on D+2; the session's
+    // startedAt alone no longer determines the bucket.
+    @Test func perDayBucketsByTurnStartedAtRatherThanSessionStartedAt() {
+        let cal = utcCalendar
+        // Day D = 2026-09-13, Day D+1 = 2026-09-14, Day D+2 = 2026-09-15
+        let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 14, minute: 0, second: 0))!
+
+        let dayDStart = cal.date(from: DateComponents(year: 2026, month: 9, day: 13, hour: 0, minute: 0, second: 0))!
+        let dayD1Start = cal.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 0, minute: 0, second: 0))!
+        let dayD2Start = cal.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 0, minute: 0, second: 0))!
+
+        var turn1Usage = ClaudeUsageTotals()
+        turn1Usage.inputTokens = 100
+        turn1Usage.outputTokens = 20
+
+        var turn2Usage = ClaudeUsageTotals()
+        turn2Usage.inputTokens = 300
+        turn2Usage.outputTokens = 50
+
+        let turn1 = Turn(
+            id: "turn-d",
+            startedAt: cal.date(from: DateComponents(year: 2026, month: 9, day: 13, hour: 10, minute: 0, second: 0))!,
+            model: "claude-sonnet-5",
+            usage: turn1Usage
+        )
+        let turn2 = Turn(
+            id: "turn-d2",
+            startedAt: cal.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 11, minute: 0, second: 0))!,
+            model: nil,
+            usage: turn2Usage
+        )
+
+        let session = Session(
+            id: "session-multi-day",
+            profile: "default",
+            filePath: "/tmp/multi.jsonl",
+            model: "claude-sonnet-5",
+            startedAt: cal.date(from: DateComponents(year: 2026, month: 9, day: 13, hour: 10, minute: 0, second: 0))!,
+            lastActivity: cal.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 11, minute: 5, second: 0))!,
+            turns: [turn1, turn2],
+            usage: turn1Usage + turn2Usage
+        )
+
+        let days = Aggregates.perDay([session], days: 3, now: now, calendar: cal)
+        #expect(days.count == 3)
+
+        // Day D
+        #expect(days[0].day == dayDStart)
+        #expect(days[0].usage.inputTokens == 100)
+        #expect(days[0].usage.outputTokens == 20)
+        let turn1Cost = CostTable.estimate(turn1Usage, model: "claude-sonnet-5").usd
+        #expect(abs(days[0].costUSD - turn1Cost) < 0.0001)
+
+        // Day D+1 (zero-filled)
+        #expect(days[1].day == dayD1Start)
+        #expect(days[1].usage.inputTokens == 0)
+        #expect(days[1].usage.outputTokens == 0)
+        #expect(days[1].costUSD == 0.0)
+        #expect(days[1].cacheReadRatio == 0.0)
+
+        // Day D+2
+        #expect(days[2].day == dayD2Start)
+        #expect(days[2].usage.inputTokens == 300)
+        #expect(days[2].usage.outputTokens == 50)
+        let turn2Cost = CostTable.estimate(turn2Usage, model: "claude-sonnet-5").usd
+        #expect(abs(days[2].costUSD - turn2Cost) < 0.0001)
     }
 
     // 5. perProject(top: 2) over 3 projects returns the 2 largest by total tokens, descending, with correct session counts; tie broken by key ascending.
@@ -266,7 +335,7 @@ struct CostAndAggregatesTests {
         #expect(sonnetBucket?.sessions == 1)
     }
 
-    // 7. todayCost counts only sessions starting on now's day; weekCost counts a session from the Monday of now's ISO week and excludes one from the previous Sunday.
+    // 7. todayCost counts only turns starting on now's day; weekCost counts a turn from the Monday of now's ISO week and excludes one from the previous Sunday.
     @Test func todayCostAndWeekCostBoundaries() {
         let cal = utcCalendar
         // 2026-09-16 is Wednesday
@@ -326,6 +395,98 @@ struct CostAndAggregatesTests {
 
         let weekCost = Aggregates.weekCost(allSessions, now: now, calendar: cal)
         #expect(abs(weekCost - (costPerSession * 2)) < 0.0001)
+    }
+
+    // todayCost: a session started yesterday with one turn today counts only today's
+    // turn; a session started today with a turn yesterday (edge, allowed) counts only
+    // today's turn.
+    @Test func todayCostCountsTurnsOnNowDay() {
+        let cal = utcCalendar
+        // Wednesday 2026-09-16 12:00:00 UTC
+        let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 12, minute: 0, second: 0))!
+        let yesterday = cal.date(from: DateComponents(year: 2026, month: 9, day: 15, hour: 10, minute: 0, second: 0))!
+        let todayMorning = cal.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 9, minute: 0, second: 0))!
+        let todayAfternoon = cal.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 11, minute: 0, second: 0))!
+
+        var turnYesterdayUsage = ClaudeUsageTotals()
+        turnYesterdayUsage.inputTokens = 100_000
+
+        var turnToday1Usage = ClaudeUsageTotals()
+        turnToday1Usage.inputTokens = 200_000
+
+        var turnToday2Usage = ClaudeUsageTotals()
+        turnToday2Usage.inputTokens = 300_000
+
+        // Session 1: started yesterday with turn 1 yesterday and turn 2 today
+        let s1TurnYesterday = Turn(id: "s1-t1", startedAt: yesterday, model: "claude-sonnet-5", usage: turnYesterdayUsage)
+        let s1TurnToday = Turn(id: "s1-t2", startedAt: todayMorning, model: "claude-sonnet-5", usage: turnToday1Usage)
+        let sessionStartedYesterday = Session(
+            id: "s-yesterday",
+            profile: "p1",
+            filePath: "/tmp/yesterday.jsonl",
+            model: "claude-sonnet-5",
+            startedAt: yesterday,
+            lastActivity: todayMorning,
+            turns: [s1TurnYesterday, s1TurnToday],
+            usage: turnYesterdayUsage + turnToday1Usage
+        )
+
+        // Session 2: started today with turn 1 yesterday (edge, allowed) and turn 2 today
+        let s2TurnYesterday = Turn(id: "s2-t1", startedAt: yesterday, model: "claude-sonnet-5", usage: turnYesterdayUsage)
+        let s2TurnToday = Turn(id: "s2-t2", startedAt: todayAfternoon, model: "claude-sonnet-5", usage: turnToday2Usage)
+        let sessionStartedToday = Session(
+            id: "s-today-edge",
+            profile: "p1",
+            filePath: "/tmp/today-edge.jsonl",
+            model: "claude-sonnet-5",
+            startedAt: todayMorning,
+            lastActivity: todayAfternoon,
+            turns: [s2TurnYesterday, s2TurnToday],
+            usage: turnYesterdayUsage + turnToday2Usage
+        )
+
+        let sessions = [sessionStartedYesterday, sessionStartedToday]
+
+        let expectedCost = CostTable.estimate(turnToday1Usage, model: "claude-sonnet-5").usd
+            + CostTable.estimate(turnToday2Usage, model: "claude-sonnet-5").usd
+
+        let cost = Aggregates.todayCost(sessions, now: now, calendar: cal)
+        #expect(abs(cost - expectedCost) < 0.0001)
+    }
+
+    // weekCost: a session started on the previous Sunday with a turn on Monday of the
+    // current ISO week counts that Monday turn and not the Sunday one.
+    @Test func weekCostCountsTurnsInCurrentIsoWeekExcludingPreviousSunday() {
+        let cal = utcCalendar
+        // Wednesday 2026-09-16 12:00:00 UTC (ISO week 2026-W38, Monday is 2026-09-14)
+        let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 12, minute: 0, second: 0))!
+        let prevSunday = cal.date(from: DateComponents(year: 2026, month: 9, day: 13, hour: 20, minute: 0, second: 0))!
+        let monday = cal.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 9, minute: 0, second: 0))!
+
+        var sundayUsage = ClaudeUsageTotals()
+        sundayUsage.inputTokens = 100_000
+
+        var mondayUsage = ClaudeUsageTotals()
+        mondayUsage.inputTokens = 250_000
+
+        let sundayTurn = Turn(id: "t-sun", startedAt: prevSunday, model: "claude-sonnet-5", usage: sundayUsage)
+        let mondayTurn = Turn(id: "t-mon", startedAt: monday, model: "claude-sonnet-5", usage: mondayUsage)
+
+        let session = Session(
+            id: "s-sun-mon",
+            profile: "p1",
+            filePath: "/tmp/sun-mon.jsonl",
+            model: "claude-sonnet-5",
+            startedAt: prevSunday,
+            lastActivity: monday,
+            turns: [sundayTurn, mondayTurn],
+            usage: sundayUsage + mondayUsage
+        )
+
+        let expectedCost = CostTable.estimate(mondayUsage, model: "claude-sonnet-5").usd
+
+        let cost = Aggregates.weekCost([session], now: now, calendar: cal)
+        #expect(abs(cost - expectedCost) < 0.0001)
     }
 
     // 8. WindowUsage.snapshot over two temp config dirs (each with projects/p/x.jsonl containing one assistant line with usage at now - 1h) sums last5h.outputTokens across both profiles and hourlyOutputTokens element-wise; the caches dictionary ends with one entry per profile.
