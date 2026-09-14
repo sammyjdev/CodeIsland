@@ -11,6 +11,7 @@ private func iso(_ date: Date) -> String {
 
 private func userPromptLine(
     prompt: String,
+    toolResults: [(toolUseId: String, content: String, isError: Bool?)] = [],
     at date: Date,
     uuid: String = UUID().uuidString,
     cwd: String? = nil,
@@ -18,6 +19,26 @@ private func userPromptLine(
     isMeta: Bool = false,
     isSidechain: Bool = false
 ) -> String {
+    let content: Any
+    if toolResults.isEmpty {
+        content = prompt
+    } else {
+        var blocks: [[String: Any]] = [
+            ["type": "text", "text": prompt]
+        ]
+        for tr in toolResults {
+            var block: [String: Any] = [
+                "type": "tool_result",
+                "tool_use_id": tr.toolUseId,
+                "content": tr.content
+            ]
+            if let isError = tr.isError {
+                block["is_error"] = isError
+            }
+            blocks.append(block)
+        }
+        content = blocks
+    }
     var dict: [String: Any] = [
         "type": "user",
         "uuid": uuid,
@@ -25,7 +46,7 @@ private func userPromptLine(
         "sessionId": sessionId,
         "message": [
             "role": "user",
-            "content": prompt
+            "content": content
         ]
     ]
     if let cwd = cwd { dict["cwd"] = cwd }
@@ -33,6 +54,28 @@ private func userPromptLine(
     if isSidechain { dict["isSidechain"] = true }
     let data = try! JSONSerialization.data(withJSONObject: dict)
     return String(data: data, encoding: .utf8)!
+}
+
+private func userPromptLine(
+    prompt: String,
+    toolResults: [(toolUseId: String, isError: Bool?)],
+    at date: Date,
+    uuid: String = UUID().uuidString,
+    cwd: String? = nil,
+    sessionId: String = "session-1",
+    isMeta: Bool = false,
+    isSidechain: Bool = false
+) -> String {
+    userPromptLine(
+        prompt: prompt,
+        toolResults: toolResults.map { ($0.toolUseId, "output", $0.isError) },
+        at: date,
+        uuid: uuid,
+        cwd: cwd,
+        sessionId: sessionId,
+        isMeta: isMeta,
+        isSidechain: isSidechain
+    )
 }
 
 private func toolResultLine(
@@ -522,5 +565,123 @@ private func makeTempDir(prefix: String) -> String {
         // Budget is 2s on a quiet machine; 4s keeps the guard against
         // quadratic regressions without flaking under parallel builds.
         #expect(elapsed < .seconds(4))
+    }
+
+    // 12. Mixed line: turn 1 has tool_use toolu_1 at t0; a user line at t0+2s with
+    // text "next question" and a tool_result for toolu_1 (is_error false) -> two turns;
+    // turn 1's call has durationMs == 2000, isError == false; turn 2's userPrompt
+    // is "next question" and has no tool calls.
+    @Test func mixedLineWithTextAndToolResult() {
+        let t0 = Date(timeIntervalSince1970: 1000.0)
+        let t2 = Date(timeIntervalSince1970: 1002.0)
+
+        let lines: [Substring] = [
+            Substring(userPromptLine(prompt: "first question", at: t0)),
+            Substring(assistantLine(
+                id: "m1",
+                toolUse: (id: "toolu_1", name: "Bash", input: ["command": "ls"]),
+                at: t0
+            )),
+            Substring(userPromptLine(
+                prompt: "next question",
+                toolResults: [(toolUseId: "toolu_1", isError: false)],
+                at: t2
+            ))
+        ]
+
+        let session = TranscriptScanner.buildSession(
+            id: "s1", profile: "prof1", filePath: "/path/s1.jsonl", lines: lines
+        )
+        #expect(session != nil)
+        guard let s = session else { return }
+
+        #expect(s.turns.count == 2)
+        guard s.turns.count == 2 else { return }
+
+        let turn1 = s.turns[0]
+        #expect(turn1.toolCalls.count == 1)
+        guard turn1.toolCalls.count == 1 else { return }
+        #expect(turn1.toolCalls[0].id == "toolu_1")
+        #expect(turn1.toolCalls[0].durationMs == 2000)
+        #expect(turn1.toolCalls[0].isError == false)
+
+        let turn2 = s.turns[1]
+        #expect(turn2.userPrompt == "next question")
+        #expect(turn2.toolCalls.isEmpty)
+    }
+
+    // 13. Late result: turn 1 has tool_use toolu_1 at t0; a text-only user line at t0+1s
+    // starts turn 2; a tool_result-only line for toolu_1 at t0+3s -> turn 1's call has
+    // durationMs == 3000; turn 2 has no tool calls.
+    @Test func lateToolResultAcrossTurns() {
+        let t0 = Date(timeIntervalSince1970: 1000.0)
+        let t1 = Date(timeIntervalSince1970: 1001.0)
+        let t3 = Date(timeIntervalSince1970: 1003.0)
+
+        let lines: [Substring] = [
+            Substring(userPromptLine(prompt: "first question", at: t0)),
+            Substring(assistantLine(
+                id: "m1",
+                toolUse: (id: "toolu_1", name: "Bash", input: ["command": "ls"]),
+                at: t0
+            )),
+            Substring(userPromptLine(prompt: "interrupted text", at: t1)),
+            Substring(toolResultLine(
+                toolUseId: "toolu_1",
+                isError: false,
+                at: t3
+            ))
+        ]
+
+        let session = TranscriptScanner.buildSession(
+            id: "s1", profile: "prof1", filePath: "/path/s1.jsonl", lines: lines
+        )
+        #expect(session != nil)
+        guard let s = session else { return }
+
+        #expect(s.turns.count == 2)
+        guard s.turns.count == 2 else { return }
+
+        let turn1 = s.turns[0]
+        #expect(turn1.toolCalls.count == 1)
+        guard turn1.toolCalls.count == 1 else { return }
+        #expect(turn1.toolCalls[0].id == "toolu_1")
+        #expect(turn1.toolCalls[0].durationMs == 3000)
+
+        let turn2 = s.turns[1]
+        #expect(turn2.toolCalls.isEmpty)
+    }
+
+    // 14. Unknown id: a tool_result for toolu_ghost changes nothing (no call appended
+    // anywhere, no crash).
+    @Test func unknownToolResultIdIgnored() {
+        let t0 = Date(timeIntervalSince1970: 1000.0)
+        let t1 = Date(timeIntervalSince1970: 1001.0)
+
+        let lines: [Substring] = [
+            Substring(userPromptLine(prompt: "hello", at: t0)),
+            Substring(assistantLine(
+                id: "m1",
+                toolUse: (id: "toolu_real", name: "Bash", input: ["command": "uptime"]),
+                at: t0
+            )),
+            Substring(toolResultLine(
+                toolUseId: "toolu_ghost",
+                isError: false,
+                at: t1
+            ))
+        ]
+
+        let session = TranscriptScanner.buildSession(
+            id: "s1", profile: "prof1", filePath: "/path/s1.jsonl", lines: lines
+        )
+        #expect(session != nil)
+        guard let s = session else { return }
+
+        #expect(s.turns.count == 1)
+        guard s.turns.count == 1 else { return }
+        #expect(s.turns[0].toolCalls.count == 1)
+        #expect(s.turns[0].toolCalls[0].id == "toolu_real")
+        #expect(s.turns[0].toolCalls[0].durationMs == nil)
     }
 }

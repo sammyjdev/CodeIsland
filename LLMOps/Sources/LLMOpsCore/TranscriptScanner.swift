@@ -38,31 +38,49 @@ public enum TranscriptScanner {
 
     private static func processToolResults(
         _ blocks: [[String: Any]],
-        into turn: inout Turn,
+        into turns: inout [Turn],
         lineTimestamp: Date?
     ) {
         for block in blocks {
             guard let toolUseId = block["tool_use_id"] as? String else { continue }
             let isError = (block["is_error"] as? Bool) ?? false
 
-            if let idx = turn.toolCalls.firstIndex(where: { $0.id == toolUseId && $0.durationMs == nil })
-                ?? turn.toolCalls.firstIndex(where: { $0.id == toolUseId }) {
-                let call = turn.toolCalls[idx]
-                let durationMs: Int?
-                if let resultTime = lineTimestamp {
-                    durationMs = Int(round(resultTime.timeIntervalSince(call.startedAt) * 1000))
-                } else {
-                    durationMs = nil
+            var match: (turnIndex: Int, callIndex: Int)? = nil
+
+            // Prefer an entry with durationMs == nil; search from the newest turn backwards
+            for turnIdx in turns.indices.reversed() {
+                if let callIdx = turns[turnIdx].toolCalls.firstIndex(where: { $0.id == toolUseId && $0.durationMs == nil }) {
+                    match = (turnIdx, callIdx)
+                    break
                 }
-                turn.toolCalls[idx] = ToolCall(
-                    id: call.id,
-                    name: call.name,
-                    inputSummary: call.inputSummary,
-                    startedAt: call.startedAt,
-                    durationMs: durationMs,
-                    isError: isError
-                )
             }
+
+            if match == nil {
+                for turnIdx in turns.indices.reversed() {
+                    if let callIdx = turns[turnIdx].toolCalls.firstIndex(where: { $0.id == toolUseId }) {
+                        match = (turnIdx, callIdx)
+                        break
+                    }
+                }
+            }
+
+            guard let (turnIdx, callIdx) = match else { continue }
+
+            let call = turns[turnIdx].toolCalls[callIdx]
+            let durationMs: Int?
+            if let resultTime = lineTimestamp {
+                durationMs = Int(round(resultTime.timeIntervalSince(call.startedAt) * 1000))
+            } else {
+                durationMs = nil
+            }
+            turns[turnIdx].toolCalls[callIdx] = ToolCall(
+                id: call.id,
+                name: call.name,
+                inputSummary: call.inputSummary,
+                startedAt: call.startedAt,
+                durationMs: durationMs,
+                isError: isError
+            )
         }
     }
 
@@ -152,6 +170,10 @@ public enum TranscriptScanner {
                     }
                     let toolResultBlocks = blocks.filter { ($0["type"] as? String) == "tool_result" }
 
+                    if !toolResultBlocks.isEmpty {
+                        processToolResults(toolResultBlocks, into: &turns, lineTimestamp: lineTimestamp)
+                    }
+
                     if !textBlocks.isEmpty {
                         let promptStr = textBlocks.joined(separator: "\n")
                         let newTurn = Turn(
@@ -164,22 +186,6 @@ public enum TranscriptScanner {
                             toolCalls: []
                         )
                         turns.append(newTurn)
-                        if !toolResultBlocks.isEmpty && !turns.isEmpty {
-                            processToolResults(toolResultBlocks, into: &turns[turns.count - 1], lineTimestamp: lineTimestamp)
-                        }
-                    } else if !toolResultBlocks.isEmpty {
-                        if turns.isEmpty {
-                            turns.append(Turn(
-                                id: uuid,
-                                startedAt: lineTimestamp ?? Date(),
-                                model: nil,
-                                userPrompt: nil,
-                                assistantText: nil,
-                                usage: ClaudeUsageTotals(),
-                                toolCalls: []
-                            ))
-                        }
-                        processToolResults(toolResultBlocks, into: &turns[turns.count - 1], lineTimestamp: lineTimestamp)
                     }
                 }
             } else if type == "assistant" {
