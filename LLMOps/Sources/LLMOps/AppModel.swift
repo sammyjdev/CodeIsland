@@ -121,11 +121,19 @@ final class AppModel {
         live.updateProfiles(newProfiles)
     }
 
-    var visibleSessions: [Session] {
+    var filter = HistoryFilter()
+
+    /// Sessions of the selected profile (or all), BEFORE the filter. Used to populate pickers.
+    var profileSessions: [Session] {
         if let selectedProfile {
             return sessions.filter { $0.profile == selectedProfile }
         }
         return sessions
+    }
+
+    /// profileSessions with `filter.apply(to:)` on top.
+    var visibleSessions: [Session] {
+        filter.apply(to: profileSessions)
     }
 
     var visibleLive: [SessionSnapshot] {

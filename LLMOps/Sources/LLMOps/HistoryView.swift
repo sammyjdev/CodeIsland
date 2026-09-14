@@ -6,9 +6,9 @@ struct HistoryView: View {
     @StateObject private var state = HistoryState()
 
     var body: some View {
-        let visible = model.visibleSessions
-        let filtered = state.filter.apply(to: visible)
-        let selectedSession = visible.first(where: { $0.id == state.selectedSessionId })
+        let profileSessions = model.profileSessions
+        let filtered = model.visibleSessions
+        let selectedSession = profileSessions.first(where: { $0.id == state.selectedSessionId })
 
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
@@ -26,7 +26,7 @@ struct HistoryView: View {
                 }
 
                 // Filter bar in an EvidenceCard
-                filterBar(visibleSessions: visible)
+                filterBar(visibleSessions: profileSessions)
 
                 // List of sessions or empty message
                 if filtered.isEmpty {
@@ -79,8 +79,8 @@ struct HistoryView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
                     Picker("Project", selection: Binding(
-                        get: { state.filter.project },
-                        set: { state.filter.project = $0 }
+                        get: { model.filter.project },
+                        set: { model.filter.project = $0 }
                     )) {
                         Text("all projects").tag(String?.none)
                         ForEach(HistoryFilter.projects(in: visibleSessions), id: \.self) { project in
@@ -90,8 +90,8 @@ struct HistoryView: View {
                     .pickerStyle(.menu)
 
                     Picker("Model", selection: Binding(
-                        get: { state.filter.model },
-                        set: { state.filter.model = $0 }
+                        get: { model.filter.model },
+                        set: { model.filter.model = $0 }
                     )) {
                         Text("all models").tag(String?.none)
                         ForEach(HistoryFilter.models(in: visibleSessions), id: \.self) { model in
@@ -101,27 +101,27 @@ struct HistoryView: View {
                     .pickerStyle(.menu)
 
                     DatePicker("From", selection: Binding(
-                        get: { state.filter.from ?? Date() },
-                        set: { state.filter.from = $0 }
+                        get: { model.filter.from ?? Date() },
+                        set: { model.filter.setFrom($0) }
                     ), displayedComponents: .date)
                     .labelsHidden()
 
                     DatePicker("To", selection: Binding(
-                        get: { state.filter.to ?? Date() },
-                        set: { state.filter.to = $0 }
+                        get: { model.filter.to ?? Date() },
+                        set: { model.filter.setTo($0) }
                     ), displayedComponents: .date)
                     .labelsHidden()
 
                     GhostButton("clear") {
-                        state.filter.from = nil
-                        state.filter.to = nil
+                        model.filter.setFrom(nil)
+                        model.filter.setTo(nil)
                     }
                 }
 
                 HStack(spacing: 8) {
                     TextField("search prompts", text: Binding(
-                        get: { state.filter.search },
-                        set: { state.filter.search = $0 }
+                        get: { model.filter.search },
+                        set: { model.filter.search = $0 }
                     ))
                     .font(Theme.Fonts.mono(12))
                     .textFieldStyle(.plain)

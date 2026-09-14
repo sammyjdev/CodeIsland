@@ -2,7 +2,12 @@ import Foundation
 import CodeIslandCore
 import LLMOpsCore
 
+enum Period: String, CaseIterable, Equatable {
+    case d7, d30, d90, all
+}
+
 struct HistoryFilter: Equatable {
+    var period: Period = .d30
     var project: String? = nil        // exact match on Session.project
     var model: String? = nil          // exact match on Session.model
     var from: Date? = nil             // inclusive, on startedAt
@@ -10,16 +15,104 @@ struct HistoryFilter: Equatable {
     var search: String = ""           // case-insensitive substring over every turn's userPrompt and the session title
     var calendar: Calendar = .autoupdatingCurrent
 
-    func apply(to sessions: [Session]) -> [Session] {
-        sessions.filter { session in
+    init(
+        period: Period? = nil,
+        project: String? = nil,
+        model: String? = nil,
+        from: Date? = nil,
+        to: Date? = nil,
+        search: String = "",
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
+        if let period {
+            self.period = period
+        } else if from != nil || to != nil {
+            self.period = .all
+        } else {
+            self.period = .d30
+        }
+        self.project = project
+        self.model = model
+        self.from = from
+        self.to = to
+        self.search = search
+        self.calendar = calendar
+    }
+
+    /// Selecting a preset clears the explicit date range.
+    mutating func select(period: Period) {
+        self.period = period
+        self.from = nil
+        self.to = nil
+    }
+
+    /// Setting an explicit date switches the preset to .all.
+    mutating func setFrom(_ date: Date?) {
+        self.from = date
+        self.period = .all
+    }
+
+    mutating func setTo(_ date: Date?) {
+        self.to = date
+        self.period = .all
+    }
+
+    /// Days the daily chart should cover. 7, 30, 90, or for .all the number of
+    /// calendar days from `earliest` (start of day) to `now` (start of day) inclusive,
+    /// minimum 1. `earliest` nil means 1.
+    func dayCount(now: Date, earliest: Date?) -> Int {
+        switch period {
+        case .d7:
+            return 7
+        case .d30:
+            return 30
+        case .d90:
+            return 90
+        case .all:
+            guard let earliest else { return 1 }
+            let startOfNow = calendar.startOfDay(for: now)
+            let startOfEarliest = calendar.startOfDay(for: earliest)
+            if startOfEarliest > startOfNow {
+                return 1
+            }
+            let diff = calendar.dateComponents([.day], from: startOfEarliest, to: startOfNow).day ?? 0
+            return max(1, diff + 1)
+        }
+    }
+
+    /// Existing filtering plus the preset lower bound: when `from` is nil and
+    /// period != .all, sessions whose startedAt is before startOfDay(now) - (days - 1) days
+    /// are dropped. `to` handling, project, model and search are unchanged.
+    func apply(to sessions: [Session], now: Date = Date()) -> [Session] {
+        let presetLowerBound: Date? = {
+            guard from == nil && period != .all else { return nil }
+            let days: Int
+            switch period {
+            case .d7: days = 7
+            case .d30: days = 30
+            case .d90: days = 90
+            case .all: return nil
+            }
+            let startOfNow = calendar.startOfDay(for: now)
+            return calendar.date(byAdding: .day, value: -(days - 1), to: startOfNow)
+                ?? startOfNow.addingTimeInterval(-Double(days - 1) * 86400)
+        }()
+
+        return sessions.filter { session in
             if let project, session.project != project {
                 return false
             }
             if let model, session.model != model {
                 return false
             }
-            if let from, session.startedAt < from {
-                return false
+            if let from {
+                if session.startedAt < from {
+                    return false
+                }
+            } else if let presetLowerBound {
+                if session.startedAt < presetLowerBound {
+                    return false
+                }
             }
             if let to {
                 let startOfToDay = calendar.startOfDay(for: to)
@@ -53,7 +146,6 @@ struct HistoryFilter: Equatable {
 
 /// Per-view state holder (ObservableObject, see toolchain rule).
 final class HistoryState: ObservableObject {
-    @Published var filter = HistoryFilter()
     @Published var selectedSessionId: String? = nil
     @Published var expandedTurnIds: Set<String> = []
 }

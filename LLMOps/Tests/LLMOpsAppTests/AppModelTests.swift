@@ -144,4 +144,71 @@ import LLMOpsCore
         #expect(counter.value == 1)
         #expect(model.sessions == [s1])
     }
+
+    // 9. With two sessions in different profiles injected via setSessionsForTesting, selectedProfile set to one of them, profileSessions returns only that profile's session.
+    @Test @MainActor func profileSessionsFiltersOnlyByProfile() {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: userDefaults)
+        #if DEBUG
+        let s1 = Session(
+            id: "s1",
+            profile: "p1",
+            filePath: "/dummy/s1.jsonl",
+            startedAt: Date(),
+            lastActivity: Date()
+        )
+        let s2 = Session(
+            id: "s2",
+            profile: "p2",
+            filePath: "/dummy/s2.jsonl",
+            startedAt: Date(),
+            lastActivity: Date()
+        )
+        model.setSessionsForTesting([s1, s2])
+
+        model.selectedProfile = "p1"
+        #expect(model.profileSessions == [s1])
+        #endif
+    }
+
+    // 10. With filter.project set, visibleSessions returns only the matching session while profileSessions still returns both.
+    @Test @MainActor func visibleSessionsAppliesFilterOverProfileSessions() {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: userDefaults)
+        #if DEBUG
+        let s1 = Session(
+            id: "s1",
+            profile: "p1",
+            filePath: "/dummy/s1.jsonl",
+            project: "alpha",
+            startedAt: Date(),
+            lastActivity: Date()
+        )
+        let s2 = Session(
+            id: "s2",
+            profile: "p1",
+            filePath: "/dummy/s2.jsonl",
+            project: "beta",
+            startedAt: Date(),
+            lastActivity: Date()
+        )
+        model.setSessionsForTesting([s1, s2])
+
+        model.filter.project = "alpha"
+        #expect(model.visibleSessions == [s1])
+        #expect(model.profileSessions == [s1, s2])
+        #endif
+    }
 }

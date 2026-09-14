@@ -206,4 +206,157 @@ import LLMOpsCore
         let result = filter.apply(to: [sSameDayEvening, sNextDayMidnight])
         #expect(result == [sSameDayEvening])
     }
+
+    // 1. period .d7 keeps a session started 6 days before now and drops one started 8 days before.
+    @Test func periodD7Keeps6DaysOldAndDrops8DaysOld() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let sKept = makeSession(id: "sKept", startedAt: now.addingTimeInterval(-6 * 86400))
+        let sDropped = makeSession(id: "sDropped", startedAt: now.addingTimeInterval(-8 * 86400))
+
+        var filter = HistoryFilter()
+        filter.calendar = cal
+        filter.period = .d7
+
+        let result = filter.apply(to: [sKept, sDropped], now: now)
+        #expect(result == [sKept])
+    }
+
+    // 2. period .d30 (the default) keeps a session 29 days old and drops one 31 days old.
+    @Test func periodD30DefaultKeeps29DaysOldAndDrops31DaysOld() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let sKept = makeSession(id: "sKept", startedAt: now.addingTimeInterval(-29 * 86400))
+        let sDropped = makeSession(id: "sDropped", startedAt: now.addingTimeInterval(-31 * 86400))
+
+        var filter = HistoryFilter()
+        filter.calendar = cal
+        #expect(filter.period == .d30)
+
+        let result = filter.apply(to: [sKept, sDropped], now: now)
+        #expect(result == [sKept])
+    }
+
+    // 3. period .all with no dates keeps a session 400 days old.
+    @Test func periodAllWithNoDatesKeeps400DaysOld() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let sOld = makeSession(id: "sOld", startedAt: now.addingTimeInterval(-400 * 86400))
+
+        var filter = HistoryFilter()
+        filter.calendar = cal
+        filter.period = .all
+
+        let result = filter.apply(to: [sOld], now: now)
+        #expect(result == [sOld])
+    }
+
+    // 4. An explicit from older than the preset window overrides it: period .d7 plus from = now - 20 days keeps a session 15 days old.
+    @Test func explicitFromOlderThanPresetWindowOverridesIt() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let s15 = makeSession(id: "s15", startedAt: now.addingTimeInterval(-15 * 86400))
+        let s25 = makeSession(id: "s25", startedAt: now.addingTimeInterval(-25 * 86400))
+
+        var filter = HistoryFilter()
+        filter.calendar = cal
+        filter.period = .d7
+        filter.from = now.addingTimeInterval(-20 * 86400)
+
+        let result = filter.apply(to: [s15, s25], now: now)
+        #expect(result == [s15])
+    }
+
+    // 5. select(period: .d90) clears from and to.
+    @Test func selectPeriodClearsFromAndTo() {
+        var filter = HistoryFilter()
+        filter.from = Date()
+        filter.to = Date()
+
+        filter.select(period: .d90)
+        #expect(filter.period == .d90)
+        #expect(filter.from == nil)
+        #expect(filter.to == nil)
+    }
+
+    // 6. setFrom(date) switches period to .all; setTo(date) does the same.
+    @Test func setFromSwitchesPeriodToAll() {
+        var filter = HistoryFilter()
+        #expect(filter.period == .d30)
+
+        let date = Date(timeIntervalSince1970: 12345)
+        filter.setFrom(date)
+        #expect(filter.period == .all)
+        #expect(filter.from == date)
+    }
+
+    @Test func setToSwitchesPeriodToAll() {
+        var filter = HistoryFilter()
+        filter.select(period: .d7)
+        #expect(filter.period == .d7)
+
+        let date = Date(timeIntervalSince1970: 67890)
+        filter.setTo(date)
+        #expect(filter.period == .all)
+        #expect(filter.to == date)
+    }
+
+    // 7. dayCount(now:earliest:): .d7 gives 7, .d30 gives 30, .d90 gives 90; .all with earliest 44 days before now gives 45; .all with earliest nil gives 1; .all with earliest later than now gives 1.
+    @Test func dayCountPresetValues() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var filter = HistoryFilter()
+        filter.calendar = cal
+
+        filter.period = .d7
+        #expect(filter.dayCount(now: now, earliest: nil) == 7)
+
+        filter.period = .d30
+        #expect(filter.dayCount(now: now, earliest: nil) == 30)
+
+        filter.period = .d90
+        #expect(filter.dayCount(now: now, earliest: nil) == 90)
+    }
+
+    @Test func dayCountAllWithEarliest44DaysBeforeNowGives45() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var filter = HistoryFilter()
+        filter.calendar = cal
+        filter.period = .all
+
+        let earliest44 = cal.date(byAdding: .day, value: -44, to: now)!
+        #expect(filter.dayCount(now: now, earliest: earliest44) == 45)
+    }
+
+    @Test func dayCountAllWithEarliestNilGives1() {
+        var filter = HistoryFilter()
+        filter.period = .all
+        #expect(filter.dayCount(now: Date(), earliest: nil) == 1)
+    }
+
+    @Test func dayCountAllWithEarliestLaterThanNowGives1() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var filter = HistoryFilter()
+        filter.calendar = cal
+        filter.period = .all
+
+        let future = cal.date(byAdding: .day, value: 5, to: now)!
+        #expect(filter.dayCount(now: now, earliest: future) == 1)
+    }
 }
