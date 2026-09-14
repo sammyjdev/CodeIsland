@@ -55,6 +55,11 @@ final class AppModel {
             sounds.handleEvent(name)
         }
         self.live = liveStore
+        // Task 7.3: a finished session is in the transcript now; pick it up
+        // without waiting for the 30s tick. rescan() ignores in-flight scans.
+        live.onSessionEnd = { [weak self] _ in
+            self?.rescan()
+        }
     }
 
     // No deinit: AppModel lives for the whole app lifetime, and a nonisolated

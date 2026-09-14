@@ -422,4 +422,18 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(item?.description == "Pick one")
         #expect(item?.options == ["a", "b"])
     }
+
+    // Task 7.3: the app rescans history when a session ends, so the store must
+    // announce SessionEnd with the session id, and only for SessionEnd.
+    @Test @MainActor func sessionEndFiresOnSessionEndCallback() throws {
+        let store = LiveStore(profiles: [])
+        var ended: [String] = []
+        store.onSessionEnd = { ended.append($0) }
+
+        store.handle(event: try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s1"}"#.utf8))), cwd: "/tmp/x")
+        #expect(ended.isEmpty)
+
+        store.handle(event: try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionEnd","session_id":"s1"}"#.utf8))), cwd: "/tmp/x")
+        #expect(ended == ["s1"])
+    }
 }

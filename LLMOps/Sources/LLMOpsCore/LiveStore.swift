@@ -36,6 +36,7 @@ public final class LiveStore: HookSink {
     public private(set) var profileOf: [String: String]        // sessionId -> profile id
     public private(set) var endedAt: [String: Date]            // sessionId -> when it ended
     public var onSound: ((String) -> Void)?                   // sound name from SideEffect.playSound
+    public var onSessionEnd: ((String) -> Void)?              // sessionId, fired once per SessionEnd event
 
     private var profiles: [Profile]
     private let clock: LiveClock
@@ -110,6 +111,7 @@ public final class LiveStore: HookSink {
         if eventName == "SessionEnd" {
             endedAt[sessionId] = clock.now
             schedulePurge(for: sessionId)
+            onSessionEnd?(sessionId)
             // Deny any pending items for this ended session
             let sessionPending = pending.filter { $0.sessionId == sessionId }
             for item in sessionPending {
