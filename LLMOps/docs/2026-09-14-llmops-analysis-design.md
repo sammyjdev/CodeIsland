@@ -282,3 +282,4 @@ public enum SystemSampler {
 **Tests**: `SystemSamplerTests` (core): cpu percent from two tick readings (idle delta 50 of 100 busy total gives 50.0), per process percent from cpuTimeNs delta over a 2 s wall interval, absent previous gives 0, top ordering and tie break, `isAIProcess` cases, `bytes` formatting. `SystemStateTests` (app): a fake probe returning scripted readings drives `start` with `interval: 0.01`, history caps at 30, `stop` halts updates, `Route.allCases` order.
 
 Out of scope: disk, network, alerts, killing processes, persisting history, parent process lookup.
+- S5 landed as two commits (109342a core, d2ccccf screen), 180 tests in 17 suites. Host added `mach_port_deallocate` for the `mach_host_self` port in `MachProbe.read`. Battery `cycleCount` and `healthPercent` stay nil in v1.
