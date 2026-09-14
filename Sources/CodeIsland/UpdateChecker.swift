@@ -42,13 +42,14 @@ final class UpdateChecker: NSObject, ObservableObject {
 
     /// Wire up Sparkle. Call once from `AppDelegate.applicationDidFinishLaunching`.
     func start() {
-        #if DEBUG
-        // Sparkle crashes if we run without a proper Bundle ID (e.g. raw executable via Xcode/SPM)
+        // ponytail: Sparkle needs a real .app bundle (Info.plist + appcast feed).
+        // A raw SPM binary (`swift build`) has no bundle identifier, so Sparkle
+        // just fails on loop with a "failed to update" box. Skip it entirely then —
+        // applies to release builds too, not only DEBUG.
         if Bundle.main.bundleIdentifier == nil {
-            Self.log.info("No Bundle ID detected in DEBUG mode — skipping Sparkle")
+            Self.log.info("No Bundle ID (raw SPM binary) — skipping Sparkle")
             return
         }
-        #endif
 
         if isHomebrewInstall {
             Self.log.info("Homebrew install detected — disabling Sparkle auto-checks")
