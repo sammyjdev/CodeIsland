@@ -229,3 +229,56 @@ Files to read first in every brief: `Sources/LLMOpsCore/Transcript.swift`, `Sour
 - `JudgePrompt.system` describes the schema with double quoted keys; the first draft used single quotes and would have invited invalid JSON. The runner args test escapes quotes in its stub for the same reason.
 - Real run of `claude -p --no-session-persistence --tools "" --model sonnet` with a sample digest: valid JSON, 5 findings, `total_cost_usd` 0.086, no new directory under `~/.claude/projects`.
 - Tasks 1 to 7 landed as one commit each on `llmops-analysis` (17e291d to cef1d98), 166 tests in 15 suites. Task 8 (acceptance in the running app) is pending the owner relaunching the bundle.
+
+## S5. System report tab (approved 2026-09-14)
+
+Owner request: a `system` screen with CPU, RAM, the processes consuming the most, and battery.
+
+**Data** (`Sources/LLMOpsCore/SystemSampler.swift`, no dependency, no process spawn):
+
+```swift
+public struct MemorySample: Equatable, Sendable { public let total, used, wired, compressed, free: UInt64 }  // bytes
+public struct ProcessSample: Identifiable, Equatable, Sendable {
+    public var id: Int32 { pid }
+    public let pid: Int32; public let name: String; public let cpuPercent: Double; public let rssBytes: UInt64; public let isAI: Bool
+}
+public struct BatterySample: Equatable, Sendable {
+    public let percent: Int; public let isCharging: Bool; public let isPluggedIn: Bool
+    public let minutesRemaining: Int?; public let cycleCount: Int?; public let healthPercent: Int?
+}
+public struct SystemSample: Equatable, Sendable {
+    public let at: Date; public let cpuPercent: Double; public let memory: MemorySample
+    public let topByCPU: [ProcessSample]; public let topByMemory: [ProcessSample]; public let battery: BatterySample?
+}
+
+/// Raw readings, one struct per tick, so the delta math is pure and testable.
+public struct RawReading: Equatable, Sendable {
+    public let at: Date
+    public let cpuTicks: (user: UInt64, system: UInt64, idle: UInt64, nice: UInt64)   // host_processor_info summed over cores
+    public let memory: MemorySample
+    public let processes: [RawProcess]   // proc_listallpids + proc_pidinfo(PROC_PIDTASKINFO) + proc_name
+    public let battery: BatterySample?   // IOPSCopyPowerSourcesInfo
+}
+public struct RawProcess: Equatable, Sendable { public let pid: Int32; public let name: String; public let cpuTimeNs: UInt64; public let rssBytes: UInt64 }
+
+public protocol SystemProbe: Sendable { func read(now: Date) -> RawReading }
+public struct MachProbe: SystemProbe { public init() }
+
+public enum SystemSampler {
+    /// Pure: cpuPercent from tick deltas, per process cpu from cpuTimeNs delta over wall time
+    /// (a process absent from `previous` gets 0). topByCPU / topByMemory are the first `top`
+    /// after sorting desc, ties by pid asc. isAI = name (lowercased) matches one of
+    /// ["claude", "codex", "agy", "ccm", "llmops", "codeisland-bridge"] as prefix or equals "node" with a parent that matches: parent
+    /// lookup is out of scope for v1, so "node" is not tagged.
+    public static func sample(previous: RawReading?, current: RawReading, top: Int) -> SystemSample
+    public static func isAIProcess(name: String) -> Bool
+}
+```
+
+`HistoryFormat.bytes(_:)` formats `UInt64` as `1.2 GB` / `340 MB` / `12 KB` (1024 based, one decimal above 10).
+
+**Screen** (`Sources/LLMOps/SystemView.swift`, `SystemState`): `Route.system` between `analysis` and `settings`. `SystemState: ObservableObject` holds `latest: SystemSample?`, `cpuHistory: [Double]` and `memoryHistory: [Double]` (ring of 30 samples), `sortBy: cpu | memory`, `previous: RawReading?`; `start(probe:interval:)` schedules a `Timer` every 2 s on the main run loop and `stop()` invalidates it; the view calls them on appear / disappear. Layout: hero cyan `MetricLine` with CPU percent and a 30 point bar sparkline (same style as the 5 h window card); magenta card with used / total RAM and its sparkline plus a mono line `wired <x>, compressed <y>, free <z>`; `top processes` card with pills `cpu` / `memory`, a mono table pid / name / cpu % / rss, rows with `isAI` get a `TagPill(text: "ai", active: true)`; `battery` card: percent as `MetricLine`, state line (`charging`, `on battery, 2h 10m left`, `plugged in, full`), cycles and health when present, `// no battery` when nil. Nothing persisted.
+
+**Tests**: `SystemSamplerTests` (core): cpu percent from two tick readings (idle delta 50 of 100 busy total gives 50.0), per process percent from cpuTimeNs delta over a 2 s wall interval, absent previous gives 0, top ordering and tie break, `isAIProcess` cases, `bytes` formatting. `SystemStateTests` (app): a fake probe returning scripted readings drives `start` with `interval: 0.01`, history caps at 30, `stop` halts updates, `Route.allCases` order.
+
+Out of scope: disk, network, alerts, killing processes, persisting history, parent process lookup.
