@@ -17,6 +17,7 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp "$ARM_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
+cp AppIcon.icns "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 
 # SwiftPM resource bundle (fonts, sounds). Bundle.module looks next to the
 # executable first, then in Contents/Resources of the enclosing .app.
