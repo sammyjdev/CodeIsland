@@ -86,7 +86,7 @@ struct SessionInspector: View {
                     Spacer()
 
                     TagPill(text: "\(turn.toolCalls.count) tools")
-                    TagPill(text: tokensStr)
+                    TagPill(text: "\(tokensStr) tokens")
                 }
                 .contentShape(Rectangle())
             }

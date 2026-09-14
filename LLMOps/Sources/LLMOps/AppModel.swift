@@ -25,6 +25,8 @@ final class AppModel {
 
     private var periodicTimer: Timer?
     private var currentScanTask: Task<Void, Never>?
+    private(set) var isScanning: Bool = false
+    private let scanner: @Sendable ([Profile], inout TranscriptScanner.ScanCache) -> [Session]
 
     var isRescanning: Bool {
         periodicTimer != nil
@@ -35,7 +37,10 @@ final class AppModel {
     private(set) var server: HookServer?
     var isServerListening: Bool { server?.isListening ?? false }
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        scanner: @escaping @Sendable ([Profile], inout TranscriptScanner.ScanCache) -> [Session] = { TranscriptScanner.scan(profiles: $0, cache: &$1) }
+    ) {
         let store = ProfileStore(userDefaults: userDefaults)
         let loaded = store.load()
         let settings = LLMOpsSettings(userDefaults: userDefaults)
@@ -44,6 +49,7 @@ final class AppModel {
         self.profiles = loaded
         self.settings = settings
         self.sounds = sounds
+        self.scanner = scanner
         let liveStore = LiveStore(profiles: loaded)
         liveStore.onSound = { [sounds] name in
             sounds.handleEvent(name)
@@ -56,13 +62,16 @@ final class AppModel {
     // Tests that create throwaway models call stopPeriodicRescan() explicitly.
 
     func rescan() {
-        currentScanTask?.cancel()
+        guard !isScanning else { return }
+        isScanning = true
         let profilesToScan = self.profiles
         let cacheToUse = self.scanCache
+        let scanFn = self.scanner
         currentScanTask = Task {
+            defer { self.isScanning = false }
             let (scannedSessions, updatedCache) = await Task.detached {
                 var localCache = cacheToUse
-                let results = TranscriptScanner.scan(profiles: profilesToScan, cache: &localCache)
+                let results = scanFn(profilesToScan, &localCache)
                 return (results, localCache)
             }.value
 
@@ -111,9 +120,14 @@ final class AppModel {
         )
     }
 
-    func startServer() {
+    /// `socketPath` nil means the default `SocketPath.path`; tests pass a temp path.
+    func startServer(socketPath: String? = nil) {
         guard server == nil else { return }
-        let s = HookServer(sink: live, config: serverConfig(from: settings))
+        let s = HookServer(
+            sink: live,
+            config: serverConfig(from: settings),
+            socketPath: socketPath ?? SocketPath.path
+        )
         s.start()
         self.server = s
     }
@@ -125,14 +139,6 @@ final class AppModel {
 
     func applySettingsToServer() {
         server?.config = serverConfig(from: settings)
-    }
-
-    func settingsDidChange() {
-        applySettingsToServer()
-    }
-
-    func saveSettings() {
-        applySettingsToServer()
     }
 
     #if DEBUG

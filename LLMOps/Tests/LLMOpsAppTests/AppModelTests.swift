@@ -89,4 +89,59 @@ import LLMOpsCore
         model.stopPeriodicRescan()
         #expect(!model.isRescanning)
     }
+
+    @Test @MainActor func rescanInFlightIsNoOp() async throws {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        final class Counter: @unchecked Sendable {
+            let lock = NSLock()
+            var count = 0
+            func increment() {
+                lock.lock()
+                defer { lock.unlock() }
+                count += 1
+            }
+            var value: Int {
+                lock.lock()
+                defer { lock.unlock() }
+                return count
+            }
+        }
+
+        let counter = Counter()
+        let s1 = Session(
+            id: "s1",
+            profile: "pessoal",
+            filePath: "/dummy/s1.jsonl",
+            startedAt: Date(),
+            lastActivity: Date()
+        )
+
+        let model = AppModel(userDefaults: userDefaults, scanner: { _, _ in
+            counter.increment()
+            Thread.sleep(forTimeInterval: 0.2)
+            return [s1]
+        })
+
+        #expect(model.isScanning == false)
+        model.rescan()
+        #expect(model.isScanning == true)
+
+        model.rescan()
+        #expect(model.isScanning == true)
+
+        for _ in 0..<50 {
+            if !model.isScanning { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        #expect(model.isScanning == false)
+        #expect(counter.value == 1)
+        #expect(model.sessions == [s1])
+    }
 }

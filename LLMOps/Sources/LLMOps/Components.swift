@@ -153,15 +153,19 @@ struct SourceLine: View {
 struct StatusDot: View {
     let status: AgentStatus
 
-    private var dotColor: Color {
+    static func color(for status: AgentStatus) -> Color {
         switch status {
         case .idle:
             return Theme.Colors.textMuted
         case .processing, .running:
             return Theme.Colors.magenta
         case .waitingApproval, .waitingQuestion:
-            return Theme.Colors.cyan
+            return Theme.Colors.magentaBright
         }
+    }
+
+    private var dotColor: Color {
+        Self.color(for: status)
     }
 
     var body: some View {

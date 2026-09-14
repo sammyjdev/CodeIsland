@@ -282,4 +282,37 @@ struct AnalyticsViewModelTests {
         #expect(state.windowCaches["prof-2"] != nil)
         #expect(state.snapshot?.window.last5h.outputTokens == 40)
     }
+
+    // 6. build with one profile yields a sourceLine containing that profile's /projects and not the other's.
+    @Test func buildSourceLineContainsProjectsDirCollapsed() {
+        let p1 = Profile(id: "prof1", name: "Prof 1", configDir: "~/.claude", pathPrefixes: [])
+        let p2 = Profile(id: "prof2", name: "Prof 2", configDir: "~/.claude-zed", pathPrefixes: [])
+
+        let window = WindowUsage(
+            last5h: ClaudeUsageTotals(),
+            today: ClaudeUsageTotals(),
+            hourlyOutputTokens: [Int](repeating: 0, count: 12),
+            scannedAt: Date()
+        )
+
+        let snapshot = AnalyticsViewModel.build(
+            sessions: [],
+            profiles: [p1],
+            window: window,
+            now: Date(),
+            calendar: .current
+        )
+
+        #expect(snapshot.sourceLine.contains("~/.claude/projects"))
+        #expect(!snapshot.sourceLine.contains("prof2"))
+        #expect(!snapshot.sourceLine.contains(p2.configDir))
+        #expect(!snapshot.sourceLine.contains("claude-zed"))
+    }
+
+    // 7. heroKind returns .weekCost when selectedProfile != nil, and .windowTokens when nil.
+    @Test func heroKindSelection() {
+        #expect(AnalyticsViewModel.heroKind(selectedProfile: nil) == .windowTokens)
+        #expect(AnalyticsViewModel.heroKind(selectedProfile: "afya") == .weekCost)
+        #expect(AnalyticsViewModel.heroKind(selectedProfile: "pessoal") == .weekCost)
+    }
 }

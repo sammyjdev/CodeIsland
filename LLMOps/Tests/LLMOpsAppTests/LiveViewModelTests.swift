@@ -163,23 +163,16 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(LiveViewModel.elapsedText(from: now.addingTimeInterval(-4320), to: now) == "1h 12m")
     }
 
-    // 5. AppModel (fresh UserDefaults suite): startServer() twice creates a single
-    // server and isServerListening == true (set CODEISLAND_SOCKET_PATH to a temp path first);
+    // 5. AppModel (fresh UserDefaults suite): startServer(socketPath:) twice creates a single
+    // server and isServerListening == true (passes unique temp path without touching env);
     // stopServer() removes the socket file; live.onSound is non-nil after init.
     @Test @MainActor func appModelServerLifecycleAndSoundWiring() async throws {
         let suite = "LiveAppModelTests-" + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        try await Task.sleep(nanoseconds: 1_200_000_000)
-        while getenv("CODEISLAND_SOCKET_PATH") != nil {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
         let tempSocket = "/tmp/llmops-test-\(UUID().uuidString).sock"
-        setenv("CODEISLAND_SOCKET_PATH", tempSocket, 1)
         defer {
-            unsetenv("CODEISLAND_SOCKET_PATH")
             unlink(tempSocket)
         }
 
@@ -188,12 +181,12 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(model.server == nil)
         #expect(model.isServerListening == false)
 
-        model.startServer()
+        model.startServer(socketPath: tempSocket)
         let server1 = model.server
         #expect(server1 != nil)
         #expect(model.isServerListening == true)
 
-        model.startServer()
+        model.startServer(socketPath: tempSocket)
         #expect(model.server === server1)
 
         var found = false
@@ -219,19 +212,13 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        while getenv("CODEISLAND_SOCKET_PATH") != nil {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
         let tempSocket = "/tmp/llmops-test-\(UUID().uuidString).sock"
-        setenv("CODEISLAND_SOCKET_PATH", tempSocket, 1)
         defer {
-            unsetenv("CODEISLAND_SOCKET_PATH")
             unlink(tempSocket)
         }
 
         let model = AppModel(userDefaults: defaults)
-        model.startServer()
+        model.startServer(socketPath: tempSocket)
         defer { model.stopServer() }
 
         #expect(model.server?.config.autoApproveTools == [])
@@ -240,5 +227,11 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         model.applySettingsToServer()
 
         #expect(model.server?.config.autoApproveTools == ["Read"])
+    }
+
+    // 7. StatusDot color for waiting states is magentaBright; cyan is kept only on the hero element.
+    @Test func statusDotWaitingColorsAreMagentaBright() {
+        #expect(StatusDot.color(for: .waitingApproval) == Theme.Colors.magentaBright)
+        #expect(StatusDot.color(for: .waitingQuestion) == Theme.Colors.magentaBright)
     }
 }

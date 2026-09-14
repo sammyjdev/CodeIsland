@@ -8,6 +8,7 @@ struct HistoryFilter: Equatable {
     var from: Date? = nil             // inclusive, on startedAt
     var to: Date? = nil               // inclusive, on startedAt
     var search: String = ""           // case-insensitive substring over every turn's userPrompt and the session title
+    var calendar: Calendar = .autoupdatingCurrent
 
     func apply(to sessions: [Session]) -> [Session] {
         sessions.filter { session in
@@ -20,8 +21,12 @@ struct HistoryFilter: Equatable {
             if let from, session.startedAt < from {
                 return false
             }
-            if let to, session.startedAt > to {
-                return false
+            if let to {
+                let startOfToDay = calendar.startOfDay(for: to)
+                let endOfToDay = calendar.date(byAdding: .day, value: 1, to: startOfToDay) ?? startOfToDay.addingTimeInterval(86400)
+                if session.startedAt >= endOfToDay {
+                    return false
+                }
             }
             if !search.isEmpty {
                 let query = search.lowercased()

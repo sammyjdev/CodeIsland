@@ -85,9 +85,12 @@ import LLMOpsCore
 
     // 3. Date range is inclusive on both ends and works with only from or only to.
     @Test func dateRangeIsInclusiveAndWorksWithOnlyFromOrOnlyTo() {
-        let d1 = Date(timeIntervalSince1970: 1000)
-        let d2 = Date(timeIntervalSince1970: 2000)
-        let d3 = Date(timeIntervalSince1970: 3000)
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let d1 = Date(timeIntervalSince1970: 0)
+        let d2 = Date(timeIntervalSince1970: 86400)
+        let d3 = Date(timeIntervalSince1970: 172800)
 
         let s1 = makeSession(id: "s1", startedAt: d1)
         let s2 = makeSession(id: "s2", startedAt: d2)
@@ -95,18 +98,23 @@ import LLMOpsCore
         let sessions = [s1, s2, s3]
 
         var filter = HistoryFilter(from: d2)
+        filter.calendar = cal
         #expect(filter.apply(to: sessions) == [s2, s3])
 
         filter = HistoryFilter(to: d2)
+        filter.calendar = cal
         #expect(filter.apply(to: sessions) == [s1, s2])
 
         filter = HistoryFilter(from: d2, to: d2)
+        filter.calendar = cal
         #expect(filter.apply(to: sessions) == [s2])
 
         filter = HistoryFilter(from: d1, to: d3)
+        filter.calendar = cal
         #expect(filter.apply(to: sessions) == [s1, s2, s3])
 
-        filter = HistoryFilter(from: Date(timeIntervalSince1970: 2500), to: Date(timeIntervalSince1970: 2600))
+        filter = HistoryFilter(from: Date(timeIntervalSince1970: 250000), to: Date(timeIntervalSince1970: 260000))
+        filter.calendar = cal
         #expect(filter.apply(to: sessions).isEmpty)
     }
 
@@ -177,5 +185,25 @@ import LLMOpsCore
         #expect(HistoryFormat.duration(ms: 850) == "850ms")
         #expect(HistoryFormat.duration(ms: 1250) == "1.3s")
         #expect(HistoryFormat.duration(ms: 61000) == "1m 01s")
+    }
+
+    // 8. to date includes the whole calendar day in filter's calendar
+    @Test func historyFilterToDateIncludesWholeDay() {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(identifier: "UTC")!
+
+        let toDate = f.date(from: "2026-09-10T00:00:00Z")!
+        let sSameDayEvening = makeSession(id: "s1", startedAt: f.date(from: "2026-09-10T18:00:00Z")!)
+        let sNextDayMidnight = makeSession(id: "s2", startedAt: f.date(from: "2026-09-11T00:00:00Z")!)
+
+        var filter = HistoryFilter(to: toDate)
+        filter.calendar = cal
+
+        let result = filter.apply(to: [sSameDayEvening, sNextDayMidnight])
+        #expect(result == [sSameDayEvening])
     }
 }

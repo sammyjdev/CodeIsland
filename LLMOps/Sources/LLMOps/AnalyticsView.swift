@@ -18,9 +18,16 @@ struct AnalyticsView: View {
                 }
 
                 if let snapshot = state.snapshot, snapshot.sessionCount > 0 {
+                    let kind = AnalyticsViewModel.heroKind(selectedProfile: model.selectedProfile)
                     HStack(alignment: .top, spacing: 16) {
-                        heroCard(snapshot: snapshot)
-                        costCard(snapshot: snapshot)
+                        switch kind {
+                        case .windowTokens:
+                            windowTokensCard(snapshot: snapshot, isHero: true)
+                            costCard(snapshot: snapshot, isHero: false)
+                        case .weekCost:
+                            costCard(snapshot: snapshot, isHero: true)
+                            windowTokensCard(snapshot: snapshot, isHero: false)
+                        }
                     }
 
                     dailyTokensCard(snapshot: snapshot)
@@ -38,14 +45,18 @@ struct AnalyticsView: View {
         }
         .background(Theme.Colors.bg)
         .onAppear {
-            state.refresh(sessions: model.visibleSessions, profiles: model.profiles)
+            state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles)
         }
         .onChange(of: model.lastScanAt) { _, _ in
-            state.refresh(sessions: model.visibleSessions, profiles: model.profiles)
+            state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles)
         }
         .onChange(of: model.selectedProfile) { _, _ in
-            state.refresh(sessions: model.visibleSessions, profiles: model.profiles)
+            state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles)
         }
+    }
+
+    private var scopedProfiles: [Profile] {
+        model.selectedProfile.map { id in model.profiles.filter { $0.id == id } } ?? model.profiles
     }
 
     private func cleanSourceLine(_ raw: String) -> String {
@@ -55,13 +66,13 @@ struct AnalyticsView: View {
         return raw
     }
 
-    private func heroCard(snapshot: AnalyticsSnapshot) -> some View {
+    private func windowTokensCard(snapshot: AnalyticsSnapshot, isHero: Bool) -> some View {
         EvidenceCard {
             VStack(alignment: .leading, spacing: 12) {
                 MetricLine(
                     value: tokens(snapshot.window.last5h.outputTokens),
                     label: "output tokens, last 5h",
-                    accent: .cyan
+                    accent: isHero ? .cyan : .magenta
                 )
 
                 Chart(Array(snapshot.window.hourlyOutputTokens.enumerated()), id: \.offset) { index, tokens in
@@ -69,7 +80,7 @@ struct AnalyticsView: View {
                         x: .value("hour", index),
                         y: .value("tokens", tokens)
                     )
-                    .foregroundStyle(Theme.Colors.cyan)
+                    .foregroundStyle(isHero ? Theme.Colors.cyan : Theme.Colors.magenta)
                 }
                 .chartXAxis(.hidden)
                 .chartYAxis(.hidden)
@@ -81,18 +92,30 @@ struct AnalyticsView: View {
         }
     }
 
-    private func costCard(snapshot: AnalyticsSnapshot) -> some View {
+    private func costCard(snapshot: AnalyticsSnapshot, isHero: Bool) -> some View {
         EvidenceCard {
             VStack(alignment: .leading, spacing: 12) {
-                MetricLine(
-                    value: usd(snapshot.todayCostUSD),
-                    label: "estimated cost today",
-                    accent: .magenta
-                )
+                if isHero {
+                    MetricLine(
+                        value: usd(snapshot.weekCostUSD),
+                        label: "estimated cost, this ISO week",
+                        accent: .cyan
+                    )
 
-                Text("week: \(usd(snapshot.weekCostUSD)) (estimate, price table)")
-                    .font(Theme.Fonts.mono(11))
-                    .foregroundStyle(Theme.Colors.textDim)
+                    Text("today: \(usd(snapshot.todayCostUSD)) (estimate, price table)")
+                        .font(Theme.Fonts.mono(11))
+                        .foregroundStyle(Theme.Colors.textDim)
+                } else {
+                    MetricLine(
+                        value: usd(snapshot.todayCostUSD),
+                        label: "estimated cost today",
+                        accent: .magenta
+                    )
+
+                    Text("week: \(usd(snapshot.weekCostUSD)) (estimate, price table)")
+                        .font(Theme.Fonts.mono(11))
+                        .foregroundStyle(Theme.Colors.textDim)
+                }
 
                 Spacer(minLength: 0)
 

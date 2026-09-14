@@ -13,7 +13,18 @@ struct AnalyticsSnapshot: Equatable {
     let sourceLine: String                  // "src: <configDir list joined by ", ">, n=<sessionCount> sessions"
 }
 
+enum HeroKind: Sendable, Equatable {
+    case windowTokens
+    case weekCost
+}
+
 enum AnalyticsViewModel {
+    typealias HeroKind = LLMOps.HeroKind
+
+    static func heroKind(selectedProfile: String?) -> HeroKind {
+        selectedProfile != nil ? .weekCost : .windowTokens
+    }
+
     /// Pure composition over already-scanned sessions plus a window snapshot.
     static func build(
         sessions: [Session],
@@ -29,10 +40,20 @@ enum AnalyticsViewModel {
         let weekCost = Aggregates.weekCost(sessions, now: now, calendar: calendar)
         let count = sessions.count
 
-        let configDirs = profiles.map(\.configDir).joined(separator: ", ")
-        let sourceLine = configDirs.isEmpty
+        let home = NSHomeDirectory()
+        let projectDirs = profiles.map { profile in
+            let dir = profile.projectsDir
+            if dir == home {
+                return "~"
+            } else if dir.hasPrefix(home + "/") {
+                return "~" + dir.dropFirst(home.count)
+            }
+            return dir
+        }.joined(separator: ", ")
+
+        let sourceLine = projectDirs.isEmpty
             ? "src: n=\(count) sessions"
-            : "src: \(configDirs), n=\(count) sessions"
+            : "src: \(projectDirs), n=\(count) sessions"
 
         return AnalyticsSnapshot(
             window: window,
@@ -130,12 +151,12 @@ final class AnalyticsState: ObservableObject {
     }
 }
 
-// Note: HistoryFormat is missing from this workspace (Task 9 not yet merged),
-// so tokens and usd formatters are implemented here as helper functions.
+// Thin aliases so Analytics and History format numbers identically
+// (HistoryFormat.usd keeps 4 decimals below one dollar).
 func tokens(_ count: Int) -> String {
-    ClaudeUsageScanner.formatTokens(count)
+    HistoryFormat.tokens(count)
 }
 
 func usd(_ amount: Double) -> String {
-    String(format: "$%.2f", amount)
+    HistoryFormat.usd(amount)
 }

@@ -1,7 +1,7 @@
 import Foundation
 import LLMOpsCore
 
-/// Draft of the profiles table; committed with `commit(into:)`.
+/// Draft of the profiles table.
 struct ProfilesDraft: Equatable {
     var profiles: [Profile]
 
@@ -68,11 +68,6 @@ struct ProfilesDraft: Equatable {
             }
         }
         return true
-    }
-
-    @MainActor
-    func commit(into model: AppModel) {
-        model.saveProfiles(profiles)
     }
 }
 
