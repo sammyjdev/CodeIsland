@@ -28,9 +28,10 @@ public struct SystemClock: LiveClock {
 @MainActor @Observable
 public final class LiveStore: HookSink {
     public static let permissionTimeout: TimeInterval = 110
-    public static let endedRetention: TimeInterval = 60
+    public nonisolated static let defaultEndedRetention: TimeInterval = 60
     public static let maxHistory = 50
 
+    public var endedRetention: TimeInterval
     public private(set) var sessions: [String: SessionSnapshot]
     public private(set) var pending: [PendingPermission]       // oldest first
     public private(set) var profileOf: [String: String]        // sessionId -> profile id
@@ -44,13 +45,24 @@ public final class LiveStore: HookSink {
     private var pendingCancelHandles: [UUID: () -> Void] = [:]
     private var purgeCancelHandles: [String: () -> Void] = [:]
 
-    public init(profiles: [Profile], clock: LiveClock = SystemClock()) {
+    public init(profiles: [Profile], clock: LiveClock = SystemClock(), endedRetention: TimeInterval = defaultEndedRetention) {
         self.sessions = [:]
         self.pending = []
         self.profileOf = [:]
         self.endedAt = [:]
         self.profiles = profiles
         self.clock = clock
+        self.endedRetention = endedRetention
+    }
+
+    public func clearEnded() {
+        for (sessionId, _) in endedAt {
+            purgeCancelHandles[sessionId]?()
+            purgeCancelHandles.removeValue(forKey: sessionId)
+            sessions.removeValue(forKey: sessionId)
+            profileOf.removeValue(forKey: sessionId)
+        }
+        endedAt.removeAll()
     }
 
     public func updateProfiles(_ profiles: [Profile]) {
@@ -252,7 +264,7 @@ public final class LiveStore: HookSink {
 
         for (sessionId, session) in sessions {
             if let ended = endedAt[sessionId] {
-                if currentNow.timeIntervalSince(ended) >= Self.endedRetention {
+                if currentNow.timeIntervalSince(ended) >= endedRetention {
                     continue
                 }
             }
@@ -273,7 +285,7 @@ public final class LiveStore: HookSink {
 
     private func schedulePurge(for sessionId: String) {
         purgeCancelHandles[sessionId]?()
-        let cancel = clock.schedule(after: Self.endedRetention) { [weak self] in
+        let cancel = clock.schedule(after: endedRetention) { [weak self] in
             if Thread.isMainThread {
                 MainActor.assumeIsolated {
                     guard let self else { return }

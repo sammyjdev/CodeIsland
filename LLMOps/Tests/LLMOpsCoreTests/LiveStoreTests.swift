@@ -436,4 +436,59 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         store.handle(event: try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionEnd","session_id":"s1"}"#.utf8))), cwd: "/tmp/x")
         #expect(ended == ["s1"])
     }
+
+    // Required F6.2: clearEnded removes only ended sessions
+    @Test @MainActor func clearEndedRemovesOnlyEndedSessions() throws {
+        let profile = Profile(id: "p1", name: "P1", configDir: "/tmp/c", pathPrefixes: ["/tmp"])
+        let store = LiveStore(profiles: [profile])
+        let start1 = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s1"}"#.utf8)))
+        store.handle(event: start1, cwd: "/tmp/live")
+
+        let start2 = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s2"}"#.utf8)))
+        store.handle(event: start2, cwd: "/tmp/ended")
+
+        let end2 = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionEnd","session_id":"s2"}"#.utf8)))
+        store.handle(event: end2, cwd: "/tmp/ended")
+
+        #expect(store.sessions["s1"] != nil)
+        #expect(store.profileOf["s1"] == "p1")
+        #expect(store.sessions["s2"] != nil)
+        #expect(store.profileOf["s2"] == "p1")
+        #expect(store.endedAt["s2"] != nil)
+
+        store.clearEnded()
+
+        #expect(store.sessions["s1"] != nil)
+        #expect(store.profileOf["s1"] == "p1")
+        #expect(store.endedAt["s1"] == nil)
+
+        #expect(store.sessions["s2"] == nil)
+        #expect(store.profileOf["s2"] == nil)
+        #expect(store.endedAt["s2"] == nil)
+    }
+
+    // Required F6.3: endedRetention is configurable
+    @Test @MainActor func endedRetentionIsConfigurable() throws {
+        let clock = FakeClock()
+        let now = clock.now
+        let store = LiveStore(profiles: [], clock: clock, endedRetention: 5)
+
+        let startJSON = Data(#"{"hook_event_name":"SessionStart","session_id":"s1"}"#.utf8)
+        store.handle(event: try #require(HookEvent(from: startJSON)), cwd: nil)
+
+        let endJSON = Data(#"{"hook_event_name":"SessionEnd","session_id":"s1"}"#.utf8)
+        store.handle(event: try #require(HookEvent(from: endJSON)), cwd: nil)
+
+        #expect(store.endedAt["s1"] == now)
+
+        clock.fire(upTo: now.addingTimeInterval(4))
+        #expect(store.liveSessions(profile: nil).count == 1)
+        #expect(store.sessions["s1"] != nil)
+        #expect(store.endedAt["s1"] != nil)
+
+        clock.fire(upTo: now.addingTimeInterval(5))
+        #expect(store.liveSessions(profile: nil).isEmpty)
+        #expect(store.sessions["s1"] == nil)
+        #expect(store.endedAt["s1"] == nil)
+    }
 }

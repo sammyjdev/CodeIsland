@@ -119,6 +119,7 @@ final class SettingsState: ObservableObject {
     @Published var excludedText = ""
     @Published var quietStartText = ""
     @Published var quietEndText = ""
+    @Published var endedRetentionText = ""
 
     init(profiles: [Profile], settings: LLMOpsSettings) {
         self.draft = ProfilesDraft(profiles: profiles)
@@ -129,5 +130,6 @@ final class SettingsState: ObservableObject {
         self.excludedText = ListField.join(settings.excludedCwdSubstrings)
         self.quietStartText = Minutes.text(settings.quietHoursStartMinutes)
         self.quietEndText = Minutes.text(settings.quietHoursEndMinutes)
+        self.endedRetentionText = "\(settings.endedRetentionSeconds)"
     }
 }

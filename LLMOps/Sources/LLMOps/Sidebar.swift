@@ -57,7 +57,7 @@ struct Sidebar: View {
 
                             Spacer()
                         }
-                        .frame(minHeight: 32)
+                        .frame(height: 32)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

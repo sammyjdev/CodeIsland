@@ -28,19 +28,19 @@ enum Theme {
             .custom("SpaceGrotesk-Bold", size: size)
         }
 
-        static func body(_ size: CGFloat = 13) -> Font {
+        static func body(_ size: CGFloat = 14) -> Font {
             .custom("IBMPlexSans-Regular", size: size)
         }
 
-        static func bodyMedium(_ size: CGFloat = 13) -> Font {
+        static func bodyMedium(_ size: CGFloat = 14) -> Font {
             .custom("IBMPlexSans-Medium", size: size)
         }
 
-        static func label(_ size: CGFloat = 11) -> Font {
+        static func label(_ size: CGFloat = 12) -> Font {
             .custom("JetBrainsMono-Medium", size: size)
         }
 
-        static func mono(_ size: CGFloat = 12) -> Font {
+        static func mono(_ size: CGFloat = 13) -> Font {
             .custom("JetBrainsMono-Regular", size: size)
         }
 

@@ -63,6 +63,23 @@ final class FakeClock: LiveClock, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct LiveViewModelTests {
+    @Test func titlePrefersProjectThenPromptThenId() {
+        // project "sage" -> "sage"
+        #expect(LiveViewModel.title(project: "sage", lastUserPrompt: nil, sessionId: "5fe1f88d1234") == "sage")
+        #expect(LiveViewModel.title(project: "sage", lastUserPrompt: "fix the build\nmore", sessionId: "5fe1f88d1234") == "sage")
+
+        // project "unknown" with prompt "fix the build\nmore" -> "fix the build"
+        #expect(LiveViewModel.title(project: "unknown", lastUserPrompt: "fix the build\nmore", sessionId: "5fe1f88d1234") == "fix the build")
+
+        // both missing -> "session 5fe1f88d"
+        #expect(LiveViewModel.title(project: "unknown", lastUserPrompt: nil, sessionId: "5fe1f88d1234") == "session 5fe1f88d")
+
+        // a 100 character prompt is cut to 60
+        let longPrompt = String(repeating: "a", count: 100)
+        let expected60 = String(repeating: "a", count: 60)
+        #expect(LiveViewModel.title(project: "unknown", lastUserPrompt: longPrompt, sessionId: "5fe1f88d1234") == expected60)
+    }
+
     // 1. Two sessions with different lastActivity -> rows ordered newest first;
     // title falls back to "session <8 chars>" when no title metadata exists;
     // project is the cwd basename.
@@ -81,11 +98,11 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         let rows = LiveViewModel.rows(from: store, profile: nil)
         #expect(rows.count == 2)
         #expect(rows[0].id == "s2-987654321000")
-        #expect(rows[0].title == "session s2-98765")
+        #expect(rows[0].title == "projectBeta")
         #expect(rows[0].project == "projectBeta")
 
         #expect(rows[1].id == "s1-abcdef123456")
-        #expect(rows[1].title == "session s1-abcde")
+        #expect(rows[1].title == "projectAlpha")
         #expect(rows[1].project == "projectAlpha")
 
         // Title metadata uses displayTitle
@@ -94,6 +111,13 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         let rowsWithTitle = LiveViewModel.rows(from: store, profile: nil)
         let rowS3 = rowsWithTitle.first { $0.id == "s3-custom-title" }
         #expect(rowS3?.title == "Feature Branch")
+
+        // Fallback to "session <first 8 chars>" when project is unknown and no prompt
+        let s4Start = try #require(HookEvent(from: Data(#"{"hook_event_name":"SessionStart","session_id":"s4-fallback-id"}"#.utf8)))
+        store.handle(event: s4Start, cwd: nil)
+        let rowsWithFallback = LiveViewModel.rows(from: store, profile: nil)
+        let rowS4 = rowsWithFallback.first { $0.id == "s4-fallback-id" }
+        #expect(rowS4?.title == "session s4-fallb")
     }
 
     // 2. Profile filter: with profiles pessoal/afya (afya prefix "/tmp/afya"),

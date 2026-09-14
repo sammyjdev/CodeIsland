@@ -184,4 +184,26 @@ import Testing
         manager.preview("8bit_start")
         #expect(manager.lastPlayed == "8bit_start")
     }
+
+    // Required F6.4: endedRetentionSeconds defaults to 60, clamps to 0...600, persists
+    @Test @MainActor func endedRetentionSecondsDefaultsAndClamps() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.endedRetentionSeconds == 60)
+
+        settings.endedRetentionSeconds = 1000
+        #expect(settings.endedRetentionSeconds == 600)
+
+        let reloaded1 = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded1.endedRetentionSeconds == 600)
+
+        settings.endedRetentionSeconds = -5
+        #expect(settings.endedRetentionSeconds == 0)
+
+        let reloaded2 = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded2.endedRetentionSeconds == 0)
+    }
 }

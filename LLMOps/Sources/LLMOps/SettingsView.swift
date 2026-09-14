@@ -22,6 +22,7 @@ struct SettingsView: View {
 
                 profilesCard
                 soundsCard
+                liveCard
                 hookServerCard
             }
             .padding(24)
@@ -358,6 +359,50 @@ struct SettingsView: View {
             GhostButton("play") {
                 model.sounds.preview(wavName)
             }
+        }
+    }
+
+    // MARK: - Live Card
+
+    private var liveCard: some View {
+        EvidenceCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Eyebrow("live")
+
+                HStack(spacing: 12) {
+                    Text("ended sessions linger (s)")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    let isInvalid = Int(state.endedRetentionText.trimmingCharacters(in: .whitespacesAndNewlines)) == nil
+                    TextField("60", text: Binding(
+                        get: { state.endedRetentionText },
+                        set: { state.endedRetentionText = $0 }
+                    ))
+                    .font(Theme.Fonts.mono(12))
+                    .foregroundStyle(isInvalid ? Theme.Colors.magentaDeep : Theme.Colors.text)
+                    .textFieldStyle(.plain)
+                    .frame(width: 56)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(Theme.Colors.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                            .stroke(Theme.Colors.line, lineWidth: 1)
+                    )
+                    .onSubmit {
+                        if let seconds = Int(state.endedRetentionText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                            model.settings.endedRetentionSeconds = seconds
+                            model.applySettings()
+                            state.endedRetentionText = "\(model.settings.endedRetentionSeconds)"
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

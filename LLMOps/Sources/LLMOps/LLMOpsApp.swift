@@ -32,6 +32,7 @@ struct LLMOpsApp: App {
         WindowGroup("llmops") {
             NavigationSplitView {
                 Sidebar(model: model)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
             } detail: {
                 RouteView(model: model)
             }
@@ -44,5 +45,6 @@ struct LLMOpsApp: App {
                 model.sounds.playBoot()
             }
         }
+        .defaultSize(width: 1400, height: 900)
     }
 }

@@ -35,7 +35,7 @@ struct TagPill: View {
 
     var body: some View {
         Text(text)
-            .font(Theme.Fonts.mono(11))
+            .font(Theme.Fonts.mono(12))
             .foregroundStyle(active ? Theme.Colors.magenta : Theme.Colors.textDim)
             .padding(.vertical, 4)
             .padding(.horizontal, 10)
@@ -145,8 +145,8 @@ struct SourceLine: View {
 
     var body: some View {
         Text("src: " + text)
-            .font(Theme.Fonts.mono(10))
-            .foregroundStyle(Theme.Colors.textMuted)
+            .font(Theme.Fonts.mono(11))
+            .foregroundStyle(Theme.Colors.textDim)
     }
 }
 
@@ -180,8 +180,8 @@ struct Eyebrow: View {
 
     var body: some View {
         Text("// " + text)
-            .font(Theme.Fonts.label(11))
-            .tracking(0.08 * 11)
+            .font(Theme.Fonts.label(12))
+            .tracking(0.08 * 12)
             .foregroundStyle(Theme.Colors.magenta)
     }
 }

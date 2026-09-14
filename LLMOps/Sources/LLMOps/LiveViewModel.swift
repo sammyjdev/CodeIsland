@@ -18,6 +18,20 @@ struct LiveRow: Identifiable, Equatable {
 }
 
 enum LiveViewModel {
+    /// Title preferring project, then prompt first line trimmed to 60 chars, then session id fallback.
+    static func title(project: String, lastUserPrompt: String?, sessionId: String) -> String {
+        if project != "unknown" {
+            return project
+        }
+        if let prompt = lastUserPrompt {
+            let firstLine = prompt.split(whereSeparator: \.isNewline).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+            if !firstLine.isEmpty {
+                return String(firstLine.prefix(60))
+            }
+        }
+        return "session " + sessionId.prefix(8)
+    }
+
     /// Rows for `store.liveSessions(profile:)`, mapped 1:1, order preserved (lastActivity desc).
     @MainActor
     static func rows(from store: LiveStore, profile: String?) -> [LiveRow] {
@@ -26,19 +40,19 @@ enum LiveViewModel {
         for sessionId in store.liveSessionIds(profile: profile) {
             guard let snapshot = store.sessions[sessionId] else { continue }
 
-            let title: String
-            if snapshot.sessionLabel != nil {
-                title = snapshot.displayTitle(sessionId: sessionId)
-            } else {
-                title = "session \(sessionId.prefix(8))"
-            }
-
             let project: String
             if let cwd = snapshot.cwd {
                 let name = (cwd as NSString).lastPathComponent
                 project = (name.isEmpty || name == "/") ? "unknown" : name
             } else {
                 project = "unknown"
+            }
+
+            let title: String
+            if snapshot.sessionLabel != nil {
+                title = snapshot.displayTitle(sessionId: sessionId)
+            } else {
+                title = Self.title(project: project, lastUserPrompt: snapshot.lastUserPrompt, sessionId: sessionId)
             }
 
             let rowProfile = store.profileOf[sessionId]

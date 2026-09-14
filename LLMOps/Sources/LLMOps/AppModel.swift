@@ -50,7 +50,7 @@ final class AppModel {
         self.settings = settings
         self.sounds = sounds
         self.scanner = scanner
-        let liveStore = LiveStore(profiles: loaded)
+        let liveStore = LiveStore(profiles: loaded, endedRetention: TimeInterval(settings.endedRetentionSeconds))
         liveStore.onSound = { [sounds] name in
             sounds.handleEvent(name)
         }
@@ -142,8 +142,13 @@ final class AppModel {
         server = nil
     }
 
-    func applySettingsToServer() {
+    func applySettings() {
         server?.config = serverConfig(from: settings)
+        live.endedRetention = TimeInterval(settings.endedRetentionSeconds)
+    }
+
+    func applySettingsToServer() {
+        applySettings()
     }
 
     #if DEBUG

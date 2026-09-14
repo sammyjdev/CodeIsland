@@ -16,6 +16,20 @@ public final class LLMOpsSettings {
         public static let quietHoursEnd = "llmops.quietHours.endMinutes"     // default 8*60
         public static let autoApproveTools = "llmops.hooks.autoApproveTools" // [String], default []
         public static let excludedCwdSubstrings = "llmops.hooks.excludedCwdSubstrings" // [String], default []
+        public static let endedRetentionSeconds = "llmops.live.endedRetentionSeconds" // default 60
+    }
+
+    public var endedRetentionSeconds: Int {
+        get {
+            access(keyPath: \.endedRetentionSeconds)
+            return defaults.object(forKey: Key.endedRetentionSeconds) as? Int ?? 60
+        }
+        set {
+            let clamped = min(600, max(0, newValue))
+            withMutation(keyPath: \.endedRetentionSeconds) {
+                defaults.set(clamped, forKey: Key.endedRetentionSeconds)
+            }
+        }
     }
 
     @ObservationIgnored

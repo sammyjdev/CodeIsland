@@ -19,6 +19,11 @@ struct LiveView: View {
                             .font(Theme.Fonts.headline())
                             .foregroundStyle(Theme.Colors.text)
                         Spacer()
+                        if rows.contains(where: \.isEnded) {
+                            GhostButton(title: "clear ended") {
+                                model.live.clearEnded()
+                            }
+                        }
                         TagPill(
                             text: model.isServerListening ? "socket: listening" : "socket: down",
                             active: model.isServerListening
