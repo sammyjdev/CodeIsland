@@ -23,26 +23,28 @@ public final class HookServer {
     public static var socketPath: String { SocketPath.path }
     public private(set) var isListening: Bool = false
     public var config: HookServerConfig
+    public let socketPath: String
 
     private let sink: any HookSink
     private var listener: NWListener?
     private let log = Logger(subsystem: "dev.samdev.llmops", category: "HookServer")
 
-    public init(sink: any HookSink, config: HookServerConfig = HookServerConfig()) {
+    public init(sink: any HookSink, config: HookServerConfig = HookServerConfig(), socketPath: String = SocketPath.path) {
         self.sink = sink
         self.config = config
+        self.socketPath = socketPath
     }
 
     public func start() {
         guard !isListening else { return }
 
-        unlink(Self.socketPath)
+        unlink(socketPath)
 
         let previousUmask = umask(0o077)
 
         let params = NWParameters()
         params.defaultProtocolStack.transportProtocol = NWProtocolTCP.Options()
-        params.requiredLocalEndpoint = NWEndpoint.unix(path: Self.socketPath)
+        params.requiredLocalEndpoint = NWEndpoint.unix(path: socketPath)
 
         do {
             listener = try NWListener(using: params)
@@ -53,7 +55,7 @@ public final class HookServer {
         }
 
         umask(previousUmask)
-        chmod(Self.socketPath, 0o600)
+        chmod(socketPath, 0o600)
 
         listener?.newConnectionHandler = { [weak self] connection in
             Task { @MainActor in
@@ -66,8 +68,8 @@ public final class HookServer {
                 guard let self = self else { return }
                 switch state {
                 case .ready:
-                    chmod(Self.socketPath, 0o600)
-                    self.log.info("HookServer listening on \(Self.socketPath)")
+                    chmod(self.socketPath, 0o600)
+                    self.log.info("HookServer listening on \(self.socketPath)")
                 case .failed(let error):
                     self.isListening = false
                     self.log.error("HookServer failed: \(error.localizedDescription)")
@@ -83,16 +85,47 @@ public final class HookServer {
 
     public func stop() {
         guard isListening || listener != nil else {
-            unlink(Self.socketPath)
+            unlink(socketPath)
             return
         }
         isListening = false
         listener?.cancel()
         listener = nil
-        unlink(Self.socketPath)
+        unlink(socketPath)
     }
 
+    private final class ConnectionContext {
+        var isHeld: Bool = false
+        var responded: Bool = false
+        var disconnectedNotified: Bool = false
+        var sessionId: String?
+    }
+
+    private var connectionContexts: [ObjectIdentifier: ConnectionContext] = [:]
+
     private func handleConnection(_ connection: NWConnection) {
+        let context = ConnectionContext()
+        let connId = ObjectIdentifier(connection)
+        connectionContexts[connId] = context
+
+        connection.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                guard let self = self else { return }
+                switch state {
+                case .cancelled, .failed:
+                    if context.isHeld && !context.responded && !context.disconnectedNotified {
+                        context.disconnectedNotified = true
+                        if let sessionId = context.sessionId {
+                            self.sink.peerDisconnected(sessionId: sessionId)
+                        }
+                    }
+                    self.connectionContexts.removeValue(forKey: connId)
+                default:
+                    break
+                }
+            }
+        }
+
         connection.start(queue: .main)
         receiveAll(connection: connection, accumulated: Data())
     }
@@ -159,6 +192,19 @@ public final class HookServer {
             return
         }
 
+        if event.toolName == "AskUserQuestion" {
+            if let context = connectionContexts[ObjectIdentifier(connection)] {
+                context.isHeld = true
+                context.sessionId = event.sessionId
+            }
+            sink.questionAsked(event: event, cwd: cwd) { [weak self, connection] decision in
+                Task { @MainActor in
+                    self?.sendResponse(connection: connection, data: decision.replyJSON)
+                }
+            }
+            return
+        }
+
         let normalized = EventNormalizer.normalize(event.eventName)
         switch normalized {
         case "PermissionRequest":
@@ -166,6 +212,10 @@ public final class HookServer {
                 sendResponse(connection: connection, data: Decision.allow.replyJSON)
                 sink.handle(event: event, cwd: cwd)
             } else {
+                if let context = connectionContexts[ObjectIdentifier(connection)] {
+                    context.isHeld = true
+                    context.sessionId = event.sessionId
+                }
                 // Strong capture on purpose: nothing else retains the connection
                 // while the user decides (up to 110s), and sendResponse cancels it.
                 sink.permissionRequested(event: event, cwd: cwd) { [weak self, connection] decision in
@@ -175,6 +225,10 @@ public final class HookServer {
                 }
             }
         case "Notification" where QuestionPayload.from(event: event) != nil:
+            if let context = connectionContexts[ObjectIdentifier(connection)] {
+                context.isHeld = true
+                context.sessionId = event.sessionId
+            }
             sink.questionAsked(event: event, cwd: cwd) { [weak self, connection] decision in
                 Task { @MainActor in
                     self?.sendResponse(connection: connection, data: decision.replyJSON)
@@ -193,6 +247,9 @@ public final class HookServer {
     }
 
     private func sendResponse(connection: NWConnection, data: Data) {
+        if let context = connectionContexts[ObjectIdentifier(connection)] {
+            context.responded = true
+        }
         connection.send(content: data, completion: .contentProcessed { [weak self] error in
             if let error = error {
                 self?.log.error("Failed to send response: \(error.localizedDescription)")

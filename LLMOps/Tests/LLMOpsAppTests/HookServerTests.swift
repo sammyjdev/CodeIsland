@@ -154,6 +154,63 @@ struct SocketClient: Sendable {
             return result
         }
     }
+
+    func sendWithoutWaiting(data: Data, timeout: TimeInterval = 5.0) throws -> Int32 {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        #if os(macOS)
+        addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
+        let maxLen = MemoryLayout.size(ofValue: addr.sun_path)
+        guard socketPath.utf8.count < maxLen else {
+            close(fd)
+            throw POSIXError(.ENAMETOOLONG)
+        }
+        _ = withUnsafeMutablePointer(to: &addr.sun_path.0) { ptr in
+            socketPath.withCString { cstr in
+                strncpy(ptr, cstr, maxLen - 1)
+            }
+        }
+
+        var connected = false
+        let connectStart = Date()
+        while !connected {
+            let connectRes = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                    connect(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            if connectRes == 0 {
+                connected = true
+                break
+            }
+            if Date().timeIntervalSince(connectStart) > timeout {
+                close(fd)
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .ECONNREFUSED)
+            }
+            usleep(10_000)
+        }
+
+        var totalWritten = 0
+        while totalWritten < data.count {
+            let written = data.withUnsafeBytes { raw in
+                write(fd, raw.baseAddress! + totalWritten, data.count - totalWritten)
+            }
+            if written <= 0 {
+                close(fd)
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            totalWritten += written
+        }
+
+        shutdown(fd, SHUT_WR)
+        return fd
+    }
 }
 
 @Suite(.serialized)
@@ -161,9 +218,7 @@ struct HookServerTests {
 
     private func withTestSocket(test: (String) async throws -> Void) async throws {
         let socketPath = "/tmp/test-hookserver-\(UUID().uuidString).sock"
-        setenv("CODEISLAND_SOCKET_PATH", socketPath, 1)
         defer {
-            unsetenv("CODEISLAND_SOCKET_PATH")
             unlink(socketPath)
         }
         try await test(socketPath)
@@ -174,7 +229,7 @@ struct HookServerTests {
     @Test @MainActor func socketLifecycleAndPermissions() async throws {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
-            let server = HookServer(sink: sink)
+            let server = HookServer(sink: sink, socketPath: socketPath)
             #expect(server.isListening == false)
 
             server.start()
@@ -208,7 +263,7 @@ struct HookServerTests {
     @Test @MainActor func sessionStartPayload() async throws {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
-            let server = HookServer(sink: sink)
+            let server = HookServer(sink: sink, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -230,7 +285,7 @@ struct HookServerTests {
     @Test @MainActor func permissionRequestPendingReply() async throws {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
-            let server = HookServer(sink: sink)
+            let server = HookServer(sink: sink, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -274,7 +329,7 @@ struct HookServerTests {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
             let config = HookServerConfig(autoApproveTools: ["Bash"])
-            let server = HookServer(sink: sink, config: config)
+            let server = HookServer(sink: sink, config: config, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -298,7 +353,7 @@ struct HookServerTests {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
             let config = HookServerConfig(excludedCwdSubstrings: ["/excluded"])
-            let server = HookServer(sink: sink, config: config)
+            let server = HookServer(sink: sink, config: config, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -327,7 +382,7 @@ struct HookServerTests {
     @Test @MainActor func notificationQuestionAsked() async throws {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
-            let server = HookServer(sink: sink)
+            let server = HookServer(sink: sink, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -363,7 +418,7 @@ struct HookServerTests {
     @Test @MainActor func sessionEndHandledThenPeerDisconnected() async throws {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
-            let server = HookServer(sink: sink)
+            let server = HookServer(sink: sink, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -387,7 +442,7 @@ struct HookServerTests {
     @Test @MainActor func garbageBytesReturnsEmptyObjectAndContinues() async throws {
         try await withTestSocket { socketPath in
             let sink = RecordingSink()
-            let server = HookServer(sink: sink)
+            let server = HookServer(sink: sink, socketPath: socketPath)
             server.start()
             defer { server.stop() }
 
@@ -407,4 +462,171 @@ struct HookServerTests {
             #expect(sink.records.first == .handle(eventName: "SessionStart", sessionId: "s2", toolName: nil, cwd: "/tmp/p2"))
         }
     }
+
+    // 9. Two servers with different explicit paths can listen at the same time.
+    @Test @MainActor func concurrentServersWithDifferentPaths() async throws {
+        let path1 = "/tmp/test-hookserver-\(UUID().uuidString).sock"
+        let path2 = "/tmp/test-hookserver-\(UUID().uuidString).sock"
+        defer {
+            unlink(path1)
+            unlink(path2)
+        }
+
+        let server1 = HookServer(sink: RecordingSink(), socketPath: path1)
+        let server2 = HookServer(sink: RecordingSink(), socketPath: path2)
+        server1.start()
+        defer { server1.stop() }
+        server2.start()
+        defer { server2.stop() }
+
+        #expect(server1.isListening == true)
+        #expect(server2.isListening == true)
+
+        var st1 = stat()
+        var st2 = stat()
+        for _ in 0..<100 {
+            let ok1 = stat(path1, &st1) == 0 && (st1.st_mode & 0o777) == 0o600
+            let ok2 = stat(path2, &st2) == 0 && (st2.st_mode & 0o777) == 0o600
+            if ok1 && ok2 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(stat(path1, &st1) == 0)
+        #expect((st1.st_mode & 0o777) == 0o600)
+        #expect(stat(path2, &st2) == 0)
+        #expect((st2.st_mode & 0o777) == 0o600)
+
+        let reply1 = try await SocketClient(socketPath: path1).send(data: Data("{}".utf8))
+        #expect(reply1 == Data("{}".utf8))
+        let reply2 = try await SocketClient(socketPath: path2).send(data: Data("{}".utf8))
+        #expect(reply2 == Data("{}".utf8))
+    }
+
+    // 10. AskUserQuestion in PermissionRequest routes to questionAsked, never auto-approved, reply with .answer("a") reaches client.
+    @Test @MainActor func askUserQuestionRoutedAsQuestion() async throws {
+        try await withTestSocket { socketPath in
+            let sink = RecordingSink()
+            let config = HookServerConfig(autoApproveTools: ["AskUserQuestion"])
+            let server = HookServer(sink: sink, config: config, socketPath: socketPath)
+            server.start()
+            defer { server.stop() }
+
+            let askPayload = try JSONSerialization.data(withJSONObject: [
+                "hook_event_name": "PermissionRequest",
+                "session_id": "s1",
+                "tool_name": "AskUserQuestion",
+                "cwd": "/tmp/p",
+                "tool_input": [
+                    "questions": [
+                        [
+                            "question": "Pick one",
+                            "options": [
+                                ["label": "a"],
+                                ["label": "b"]
+                            ]
+                        ]
+                    ]
+                ]
+            ])
+
+            let client = SocketClient(socketPath: socketPath)
+            let clientTask = Task {
+                try await client.send(data: askPayload)
+            }
+
+            let start = Date()
+            while sink.records.isEmpty && Date().timeIntervalSince(start) < 2.0 {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            #expect(sink.records.count == 1)
+            #expect(sink.records.first == .questionAsked(eventName: "PermissionRequest", sessionId: "s1", question: nil, cwd: "/tmp/p"))
+
+            #expect(!sink.pendingQuestionReplies.isEmpty)
+            sink.pendingQuestionReplies[0](.answer("a"))
+
+            let response = try await clientTask.value
+            #expect(response == Decision.answer("a").replyJSON)
+        }
+    }
+
+    // 11. Send PermissionRequest, do not resolve, close client socket -> sink records peerDisconnected("s1") within 2 s.
+    @Test @MainActor func heldConnectionClientDisconnectRecordsPeerDisconnected() async throws {
+        try await withTestSocket { socketPath in
+            let sink = RecordingSink()
+            let server = HookServer(sink: sink, socketPath: socketPath)
+            server.start()
+            defer { server.stop() }
+
+            let bashData = try JSONSerialization.data(withJSONObject: [
+                "hook_event_name": "PermissionRequest",
+                "session_id": "s1",
+                "tool_name": "Bash",
+                "cwd": "/tmp/p"
+            ])
+
+            let client = SocketClient(socketPath: socketPath)
+            let fd = try client.sendWithoutWaiting(data: bashData)
+
+            let start = Date()
+            while sink.records.isEmpty && Date().timeIntervalSince(start) < 2.0 {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            #expect(sink.records.count == 1)
+            #expect(sink.records.first == .permissionRequested(eventName: "PermissionRequest", sessionId: "s1", toolName: "Bash", cwd: "/tmp/p"))
+
+            // Close the client socket without resolving the permission
+            close(fd)
+
+            let disconnectStart = Date()
+            var disconnected = false
+            while Date().timeIntervalSince(disconnectStart) < 2.0 {
+                if sink.records.contains(where: { $0 == .peerDisconnected(sessionId: "s1") }) {
+                    disconnected = true
+                    break
+                }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            #expect(disconnected == true)
+            // Exactly once
+            let disconnectCount = sink.records.filter { $0 == .peerDisconnected(sessionId: "s1") }.count
+            #expect(disconnectCount == 1)
+        }
+    }
+
+    // 12. Normal resolution of held connection does not record peerDisconnected.
+    @Test @MainActor func heldConnectionNormalResolutionDoesNotRecordPeerDisconnected() async throws {
+        try await withTestSocket { socketPath in
+            let sink = RecordingSink()
+            let server = HookServer(sink: sink, socketPath: socketPath)
+            server.start()
+            defer { server.stop() }
+
+            let bashData = try JSONSerialization.data(withJSONObject: [
+                "hook_event_name": "PermissionRequest",
+                "session_id": "s1",
+                "tool_name": "Bash",
+                "cwd": "/tmp/p"
+            ])
+
+            let client = SocketClient(socketPath: socketPath)
+            let clientTask = Task {
+                try await client.send(data: bashData)
+            }
+
+            let start = Date()
+            while sink.records.isEmpty && Date().timeIntervalSince(start) < 2.0 {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            #expect(sink.records.count == 1)
+
+            #expect(!sink.pendingPermissionReplies.isEmpty)
+            sink.pendingPermissionReplies[0](.allow)
+
+            let response = try await clientTask.value
+            #expect(response == Decision.allow.replyJSON)
+
+            try await Task.sleep(nanoseconds: 200_000_000)
+            #expect(!sink.records.contains(where: { $0 == .peerDisconnected(sessionId: "s1") }))
+        }
+    }
 }
+
