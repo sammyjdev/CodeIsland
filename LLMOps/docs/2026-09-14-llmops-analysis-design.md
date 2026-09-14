@@ -221,3 +221,11 @@ Each task: red test first, `swift test` green from `LLMOps/`, no em dashes, no `
 Same as the v1 spec: `agy:agy-executor`, `Gemini 3.8 Flash (Medium)`, throwaway clone per task on `main`, briefs with relative paths only, host validation (`git diff | git apply`, `swift build && swift test` from `LLMOps/`, em dash grep, `.shadow` grep, `git status` shows only the task's files), review by `general-purpose`, adversarial flip before commit, one commit per task, orchestrator implements after a second agy failure on the same task.
 
 Files to read first in every brief: `Sources/LLMOpsCore/Transcript.swift`, `Sources/LLMOpsCore/Aggregates.swift`, `Sources/LLMOps/HistoryFilter.swift`, `Sources/LLMOps/AppModel.swift`, `Sources/LLMOps/Theme.swift`, `Sources/LLMOps/Components.swift`, and this spec.
+
+## Amendments (2026-09-14, after execution)
+
+- Gate on this machine is `LLMOps/test.sh` (native build system plus the CommandLineTools frameworks dir), not a bare `swift test`, which dies with "Unknown error parsing property list". Same for `swift build --build-system native`. Every brief carries this note.
+- `HistoryFilter` gained an explicit `init` that infers `period = .all` when `from` or `to` is passed, so call sites that build a filter with dates keep their meaning.
+- `JudgePrompt.system` describes the schema with double quoted keys; the first draft used single quotes and would have invited invalid JSON. The runner args test escapes quotes in its stub for the same reason.
+- Real run of `claude -p --no-session-persistence --tools "" --model sonnet` with a sample digest: valid JSON, 5 findings, `total_cost_usd` 0.086, no new directory under `~/.claude/projects`.
+- Tasks 1 to 7 landed as one commit each on `llmops-analysis` (17e291d to cef1d98), 166 tests in 15 suites. Task 8 (acceptance in the running app) is pending the owner relaunching the bundle.
