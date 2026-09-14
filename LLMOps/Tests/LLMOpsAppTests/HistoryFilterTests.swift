@@ -359,4 +359,13 @@ import LLMOpsCore
         let future = cal.date(byAdding: .day, value: 5, to: now)!
         #expect(filter.dayCount(now: now, earliest: future) == 1)
     }
+
+    // 8. Period.label gives 7d, 30d, 90d, all
+    @Test func periodLabels() {
+        #expect(Period.d7.label == "7d")
+        #expect(Period.d30.label == "30d")
+        #expect(Period.d90.label == "90d")
+        #expect(Period.all.label == "all")
+    }
 }
+

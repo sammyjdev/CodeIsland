@@ -4,13 +4,17 @@ import LLMOpsCore
 
 struct AnalyticsSnapshot: Equatable {
     let window: WindowUsage                 // from WindowUsage.snapshot
-    let perDay: [DayUsage]                  // Aggregates.perDay(days: 30)
+    let perDay: [DayUsage]                  // Aggregates.perDay(days: days)
     let perProject: [BucketUsage]           // Aggregates.perProject(top: 8)
     let perModel: [BucketUsage]             // Aggregates.perModel
     let todayCostUSD: Double
     let weekCostUSD: Double
     let sessionCount: Int
     let sourceLine: String                  // "src: <configDir list joined by ", ">, n=<sessionCount> sessions"
+    let perTool: [ToolUsage]                // Aggregates.perTool
+    let perHour: [Int]                      // Aggregates.perHour(calendar:)
+    let shape: UsageShape                   // Aggregates.shape
+    let days: Int                           // the day count used for perDay
 }
 
 enum HeroKind: Sendable, Equatable {
@@ -30,14 +34,18 @@ enum AnalyticsViewModel {
         sessions: [Session],
         profiles: [Profile],
         window: WindowUsage,
+        days: Int,
         now: Date,
         calendar: Calendar
     ) -> AnalyticsSnapshot {
-        let perDay = Aggregates.perDay(sessions, days: 30, now: now, calendar: calendar)
+        let perDay = Aggregates.perDay(sessions, days: days, now: now, calendar: calendar)
         let perProject = Aggregates.perProject(sessions, top: 8)
         let perModel = Aggregates.perModel(sessions)
         let todayCost = Aggregates.todayCost(sessions, now: now, calendar: calendar)
         let weekCost = Aggregates.weekCost(sessions, now: now, calendar: calendar)
+        let perTool = Aggregates.perTool(sessions)
+        let perHour = Aggregates.perHour(sessions, calendar: calendar)
+        let shape = Aggregates.shape(sessions)
         let count = sessions.count
 
         let home = NSHomeDirectory()
@@ -63,7 +71,11 @@ enum AnalyticsViewModel {
             todayCostUSD: todayCost,
             weekCostUSD: weekCost,
             sessionCount: count,
-            sourceLine: sourceLine
+            sourceLine: sourceLine,
+            perTool: perTool,
+            perHour: perHour,
+            shape: shape,
+            days: days
         )
     }
 
@@ -114,6 +126,7 @@ final class AnalyticsState: ObservableObject {
     func refresh(
         sessions: [Session],
         profiles: [Profile],
+        days: Int,
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> Task<Void, Never> {
@@ -132,6 +145,7 @@ final class AnalyticsState: ObservableObject {
                 sessions: sessions,
                 profiles: profiles,
                 window: window,
+                days: days,
                 now: now,
                 calendar: calendar
             )
@@ -144,10 +158,11 @@ final class AnalyticsState: ObservableObject {
     func refreshNow(
         sessions: [Session],
         profiles: [Profile],
+        days: Int,
         now: Date = Date(),
         calendar: Calendar = .current
     ) async {
-        await refresh(sessions: sessions, profiles: profiles, now: now, calendar: calendar).value
+        await refresh(sessions: sessions, profiles: profiles, days: days, now: now, calendar: calendar).value
     }
 }
 

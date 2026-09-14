@@ -17,6 +17,8 @@ struct AnalyticsView: View {
                         .foregroundStyle(Theme.Colors.text)
                 }
 
+                FilterBar(model: model)
+
                 if let snapshot = state.snapshot, snapshot.sessionCount > 0 {
                     let kind = AnalyticsViewModel.heroKind(selectedProfile: model.selectedProfile)
                     HStack(alignment: .top, spacing: 16) {
@@ -45,14 +47,22 @@ struct AnalyticsView: View {
         }
         .background(Theme.Colors.bg)
         .onAppear {
-            state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles)
+            refresh()
         }
         .onChange(of: model.lastScanAt) { _, _ in
-            state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles)
+            refresh()
         }
         .onChange(of: model.selectedProfile) { _, _ in
-            state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles)
+            refresh()
         }
+        .onChange(of: model.filter) { _, _ in
+            refresh()
+        }
+    }
+
+    private func refresh() {
+        let days = model.filter.dayCount(now: Date(), earliest: model.profileSessions.map(\.startedAt).min())
+        state.refresh(sessions: model.visibleSessions, profiles: scopedProfiles, days: days)
     }
 
     private var scopedProfiles: [Profile] {
@@ -86,7 +96,7 @@ struct AnalyticsView: View {
                 .chartYAxis(.hidden)
                 .frame(height: 36)
 
-                SourceLine(text: cleanSourceLine(snapshot.sourceLine))
+                SourceLine(text: "usage scanner, unfiltered")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -128,7 +138,7 @@ struct AnalyticsView: View {
     private func dailyTokensCard(snapshot: AnalyticsSnapshot) -> some View {
         EvidenceCard {
             VStack(alignment: .leading, spacing: 12) {
-                Eyebrow(text: "tokens per day (30d)")
+                Eyebrow(text: "tokens per day (\(snapshot.days)d)")
 
                 Chart(AnalyticsViewModel.dailySeries(snapshot.perDay)) { point in
                     BarMark(

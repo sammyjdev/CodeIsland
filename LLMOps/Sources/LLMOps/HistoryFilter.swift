@@ -4,6 +4,15 @@ import LLMOpsCore
 
 enum Period: String, CaseIterable, Equatable {
     case d7, d30, d90, all
+
+    var label: String {
+        switch self {
+        case .d7: return "7d"
+        case .d30: return "30d"
+        case .d90: return "90d"
+        case .all: return "all"
+        }
+    }
 }
 
 struct HistoryFilter: Equatable {

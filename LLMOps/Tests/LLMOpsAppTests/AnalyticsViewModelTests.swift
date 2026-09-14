@@ -90,6 +90,7 @@ struct AnalyticsViewModelTests {
             sessions: [s1, s2, s3],
             profiles: profiles,
             window: window,
+            days: 30,
             now: now,
             calendar: cal
         )
@@ -221,6 +222,7 @@ struct AnalyticsViewModelTests {
             sessions: sessions,
             profiles: profiles,
             window: window,
+            days: 30,
             now: now,
             calendar: cal
         )
@@ -274,7 +276,7 @@ struct AnalyticsViewModelTests {
         #expect(state.snapshot == nil)
         #expect(state.windowCaches.isEmpty)
 
-        await state.refreshNow(sessions: [], profiles: [p1, p2], now: now, calendar: .current)
+        await state.refreshNow(sessions: [], profiles: [p1, p2], days: 30, now: now, calendar: .current)
 
         #expect(state.snapshot != nil)
         #expect(state.windowCaches.count == 2)
@@ -299,6 +301,7 @@ struct AnalyticsViewModelTests {
             sessions: [],
             profiles: [p1],
             window: window,
+            days: 30,
             now: Date(),
             calendar: .current
         )
@@ -315,4 +318,97 @@ struct AnalyticsViewModelTests {
         #expect(AnalyticsViewModel.heroKind(selectedProfile: "afya") == .weekCost)
         #expect(AnalyticsViewModel.heroKind(selectedProfile: "pessoal") == .weekCost)
     }
+
+    // 8. build(days: 7) yields perDay.count == 7 and snapshot.days == 7.
+    @Test func buildWithCustomDays() {
+        let cal = utcCalendar
+        let now = isoDate("2026-09-15T14:00:00Z")
+        let window = WindowUsage(
+            last5h: ClaudeUsageTotals(),
+            today: ClaudeUsageTotals(),
+            hourlyOutputTokens: [Int](repeating: 0, count: 12),
+            scannedAt: now
+        )
+
+        let snapshot = AnalyticsViewModel.build(
+            sessions: [],
+            profiles: [],
+            window: window,
+            days: 7,
+            now: now,
+            calendar: cal
+        )
+
+        #expect(snapshot.perDay.count == 7)
+        #expect(snapshot.days == 7)
+    }
+
+    // 9. build over a fixture with two tool calls (one error) and turns at two different hours
+    // yields perTool.count matching Aggregates.perTool on the same sessions, perHour.count == 24, shape.toolErrors == 1.
+    @Test func buildComputesPerToolPerHourAndShape() {
+        let cal = utcCalendar
+        let now = isoDate("2026-09-15T14:00:00Z")
+        let date1 = isoDate("2026-09-15T08:00:00Z")
+        let date2 = isoDate("2026-09-15T12:00:00Z")
+
+        var usage = ClaudeUsageTotals()
+        usage.inputTokens = 100
+        usage.outputTokens = 50
+
+        let tc1 = ToolCall(id: "tc1", name: "Bash", inputSummary: "", startedAt: date1, durationMs: 100, isError: false)
+        let tc2 = ToolCall(id: "tc2", name: "Read", inputSummary: "", startedAt: date2, durationMs: 50, isError: true)
+
+        let turn1 = Turn(
+            id: "t1",
+            startedAt: date1,
+            model: "claude-sonnet-5",
+            userPrompt: "prompt 1",
+            assistantText: "resp 1",
+            usage: usage,
+            toolCalls: [tc1]
+        )
+        let turn2 = Turn(
+            id: "t2",
+            startedAt: date2,
+            model: "claude-sonnet-5",
+            userPrompt: "prompt 2",
+            assistantText: "resp 2",
+            usage: usage,
+            toolCalls: [tc2]
+        )
+
+        let session = Session(
+            id: "s1",
+            profile: "prof1",
+            filePath: "/fake/s1.jsonl",
+            project: "proj-a",
+            model: "claude-sonnet-5",
+            startedAt: date1,
+            lastActivity: date2,
+            turns: [turn1, turn2],
+            usage: usage + usage
+        )
+
+        let sessions = [session]
+        let window = WindowUsage(
+            last5h: usage,
+            today: usage,
+            hourlyOutputTokens: [Int](repeating: 0, count: 12),
+            scannedAt: now
+        )
+
+        let snapshot = AnalyticsViewModel.build(
+            sessions: sessions,
+            profiles: [],
+            window: window,
+            days: 30,
+            now: now,
+            calendar: cal
+        )
+
+        #expect(snapshot.perTool.count == Aggregates.perTool(sessions).count)
+        #expect(snapshot.perHour.count == 24)
+        #expect(snapshot.shape.toolErrors == 1)
+    }
 }
+
