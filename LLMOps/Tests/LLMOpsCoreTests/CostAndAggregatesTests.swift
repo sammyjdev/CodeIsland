@@ -539,4 +539,240 @@ struct CostAndAggregatesTests {
         let lastIdx = ClaudeUsageScanner.sparklineHours - 1
         #expect(usage.hourlyOutputTokens[lastIdx - 1] == 40)
     }
+
+    // 9. perTool: two sessions with tool calls Bash x3 (durations 100, 300, nil; one isError), Read x2 (durations 50, 70). Expect order [Bash, Read]; Bash calls 3, errors 1, median 100; Read calls 2, errors 0, median 50.
+    @Test func perToolRanksByCallsAndComputesLowerMedianAndErrors() {
+        let date1 = isoDate("2026-09-15T10:00:00Z")
+        let turn1 = Turn(
+            id: "turn-1",
+            startedAt: date1,
+            toolCalls: [
+                ToolCall(id: "tc1", name: "Bash", inputSummary: "cmd1", startedAt: date1, durationMs: 100, isError: false),
+                ToolCall(id: "tc2", name: "Bash", inputSummary: "cmd2", startedAt: date1, durationMs: 300, isError: true)
+            ]
+        )
+        let session1 = Session(
+            id: "s1",
+            profile: "default",
+            filePath: "/tmp/s1.jsonl",
+            startedAt: date1,
+            lastActivity: date1,
+            turns: [turn1]
+        )
+
+        let date2 = isoDate("2026-09-15T10:05:00Z")
+        let turn2 = Turn(
+            id: "turn-2",
+            startedAt: date2,
+            toolCalls: [
+                ToolCall(id: "tc3", name: "Bash", inputSummary: "cmd3", startedAt: date2, durationMs: nil, isError: false),
+                ToolCall(id: "tc4", name: "Read", inputSummary: "file1", startedAt: date2, durationMs: 50, isError: false),
+                ToolCall(id: "tc5", name: "Read", inputSummary: "file2", startedAt: date2, durationMs: 70, isError: false)
+            ]
+        )
+        let session2 = Session(
+            id: "s2",
+            profile: "default",
+            filePath: "/tmp/s2.jsonl",
+            startedAt: date2,
+            lastActivity: date2,
+            turns: [turn2]
+        )
+
+        let tools = Aggregates.perTool([session1, session2])
+        #expect(tools == [
+            ToolUsage(name: "Bash", calls: 3, errors: 1, medianDurationMs: 100),
+            ToolUsage(name: "Read", calls: 2, errors: 0, medianDurationMs: 50)
+        ])
+    }
+
+    // 10. perTool: a tool whose every call has nil duration yields medianDurationMs == nil.
+    @Test func perToolWithAllNilDurationsYieldsNilMedian() {
+        let date = isoDate("2026-09-15T10:00:00Z")
+        let turn = Turn(
+            id: "turn-1",
+            startedAt: date,
+            toolCalls: [
+                ToolCall(id: "tc1", name: "Write", inputSummary: "file", startedAt: date, durationMs: nil, isError: false)
+            ]
+        )
+        let session = Session(
+            id: "s1",
+            profile: "default",
+            filePath: "/tmp/s1.jsonl",
+            startedAt: date,
+            lastActivity: date,
+            turns: [turn]
+        )
+
+        let tools = Aggregates.perTool([session])
+        #expect(tools == [
+            ToolUsage(name: "Write", calls: 1, errors: 0, medianDurationMs: nil)
+        ])
+    }
+
+    // 11. perTool: ties on calls sort by name ascending (Edit x1, Bash x1 gives [Bash, Edit]).
+    @Test func perToolBreaksTiesByNameAscending() {
+        let date = isoDate("2026-09-15T10:00:00Z")
+        let turn = Turn(
+            id: "turn-1",
+            startedAt: date,
+            toolCalls: [
+                ToolCall(id: "tc1", name: "Edit", inputSummary: "f", startedAt: date, durationMs: 10, isError: false),
+                ToolCall(id: "tc2", name: "Bash", inputSummary: "cmd", startedAt: date, durationMs: 20, isError: false)
+            ]
+        )
+        let session = Session(
+            id: "s1",
+            profile: "default",
+            filePath: "/tmp/s1.jsonl",
+            startedAt: date,
+            lastActivity: date,
+            turns: [turn]
+        )
+
+        let tools = Aggregates.perTool([session])
+        #expect(tools.map(\.name) == ["Bash", "Edit"])
+    }
+
+    // 12. perTool on an empty array is empty.
+    @Test func perToolOnEmptyArrayIsEmpty() {
+        let tools = Aggregates.perTool([])
+        #expect(tools.isEmpty)
+    }
+
+    // 13. perHour: with the UTC calendar, a turn at 2026-09-10T13:30:00Z with 10 input + 5 output tokens and another at 2026-09-11T13:05:00Z with 1 cacheRead token gives an array of count 24 where index 13 == 16 and every other index == 0.
+    @Test func perHourAggregatesTokensAtMatchingHour() {
+        let cal = utcCalendar
+        var usage1 = ClaudeUsageTotals()
+        usage1.inputTokens = 10
+        usage1.outputTokens = 5
+
+        var usage2 = ClaudeUsageTotals()
+        usage2.cacheReadTokens = 1
+
+        let turn1 = Turn(
+            id: "turn-1",
+            startedAt: isoDate("2026-09-10T13:30:00Z"),
+            usage: usage1
+        )
+        let turn2 = Turn(
+            id: "turn-2",
+            startedAt: isoDate("2026-09-11T13:05:00Z"),
+            usage: usage2
+        )
+
+        let session1 = Session(
+            id: "s1",
+            profile: "default",
+            filePath: "/tmp/s1.jsonl",
+            startedAt: turn1.startedAt,
+            lastActivity: turn1.startedAt,
+            turns: [turn1]
+        )
+        let session2 = Session(
+            id: "s2",
+            profile: "default",
+            filePath: "/tmp/s2.jsonl",
+            startedAt: turn2.startedAt,
+            lastActivity: turn2.startedAt,
+            turns: [turn2]
+        )
+
+        let hourly = Aggregates.perHour([session1, session2], calendar: cal)
+        #expect(hourly.count == 24)
+        #expect(hourly[13] == 16)
+        for hour in 0..<24 where hour != 13 {
+            #expect(hourly[hour] == 0)
+        }
+    }
+
+    // 14. perHour on an empty array is 24 zeros.
+    @Test func perHourOnEmptyArrayIs24Zeros() {
+        let hourly = Aggregates.perHour([], calendar: utcCalendar)
+        #expect(hourly == Array(repeating: 0, count: 24))
+    }
+
+    // 15. shape: 2 sessions, 3 turns total, 4 tool calls with 1 error, 1000 total tokens gives turnsPerSession 1.5, tokensPerTurn ~333.33 (tolerance 0.01), toolErrorRate 0.25.
+    @Test func shapeComputesTotalsAndAverages() {
+        let date = isoDate("2026-09-15T10:00:00Z")
+
+        var usage1 = ClaudeUsageTotals()
+        usage1.inputTokens = 400
+        usage1.outputTokens = 100
+
+        var usage2 = ClaudeUsageTotals()
+        usage2.cacheCreationTokens = 300
+
+        var usage3 = ClaudeUsageTotals()
+        usage3.cacheReadTokens = 200
+
+        let turn1 = Turn(
+            id: "t1",
+            startedAt: date,
+            usage: usage1,
+            toolCalls: [
+                ToolCall(id: "tc1", name: "Bash", inputSummary: "", startedAt: date, isError: false),
+                ToolCall(id: "tc2", name: "Read", inputSummary: "", startedAt: date, isError: true)
+            ]
+        )
+        let turn2 = Turn(
+            id: "t2",
+            startedAt: date,
+            usage: usage2,
+            toolCalls: [
+                ToolCall(id: "tc3", name: "Edit", inputSummary: "", startedAt: date, isError: false)
+            ]
+        )
+        let turn3 = Turn(
+            id: "t3",
+            startedAt: date,
+            usage: usage3,
+            toolCalls: [
+                ToolCall(id: "tc4", name: "Write", inputSummary: "", startedAt: date, isError: false)
+            ]
+        )
+
+        let session1 = Session(
+            id: "s1",
+            profile: "default",
+            filePath: "/tmp/s1.jsonl",
+            startedAt: date,
+            lastActivity: date,
+            turns: [turn1, turn2],
+            usage: usage1 + usage2
+        )
+        let session2 = Session(
+            id: "s2",
+            profile: "default",
+            filePath: "/tmp/s2.jsonl",
+            startedAt: date,
+            lastActivity: date,
+            turns: [turn3],
+            usage: usage3
+        )
+
+        let shape = Aggregates.shape([session1, session2])
+        #expect(shape.sessions == 2)
+        #expect(shape.turns == 3)
+        #expect(shape.toolCalls == 4)
+        #expect(shape.toolErrors == 1)
+        #expect(shape.totalTokens == 1000)
+        #expect(abs(shape.turnsPerSession - 1.5) < 0.0001)
+        #expect(abs(shape.tokensPerTurn - 333.33) < 0.01)
+        #expect(abs(shape.toolErrorRate - 0.25) < 0.0001)
+    }
+
+    // 16. shape on an empty array: every count 0 and every ratio 0 (no division by zero).
+    @Test func shapeOnEmptyArrayIsAllZeros() {
+        let shape = Aggregates.shape([])
+        #expect(shape.sessions == 0)
+        #expect(shape.turns == 0)
+        #expect(shape.toolCalls == 0)
+        #expect(shape.toolErrors == 0)
+        #expect(shape.totalTokens == 0)
+        #expect(shape.turnsPerSession == 0.0)
+        #expect(shape.tokensPerTurn == 0.0)
+        #expect(shape.toolErrorRate == 0.0)
+    }
 }
