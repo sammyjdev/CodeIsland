@@ -33,8 +33,11 @@ struct AnalyticsView: View {
                     }
 
                     dailyTokensCard(snapshot: snapshot)
+                    shapeCard(snapshot: snapshot)
                     projectTokensCard(snapshot: snapshot)
                     modelTokensCard(snapshot: snapshot)
+                    toolsCard(snapshot: snapshot)
+                    hourCard(snapshot: snapshot)
                     cacheRatioCard(snapshot: snapshot)
                 } else {
                     Text("// no sessions scanned yet")
@@ -173,10 +176,49 @@ struct AnalyticsView: View {
         }
     }
 
+    private func shapeCard(snapshot: AnalyticsSnapshot) -> some View {
+        EvidenceCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Eyebrow(text: "shape")
+
+                HStack(alignment: .top, spacing: 24) {
+                    MetricLine(
+                        value: "\(snapshot.shape.sessions)",
+                        label: "sessions",
+                        accent: .magenta
+                    )
+                    MetricLine(
+                        value: "\(snapshot.shape.turns)",
+                        label: "turns",
+                        accent: .magenta
+                    )
+                    MetricLine(
+                        value: String(format: "%.1f", snapshot.shape.turnsPerSession),
+                        label: "turns per session",
+                        accent: .magenta
+                    )
+                    MetricLine(
+                        value: tokens(Int(snapshot.shape.tokensPerTurn)),
+                        label: "tokens per turn",
+                        accent: .magenta
+                    )
+                    MetricLine(
+                        value: String(format: "%.0f%%", snapshot.shape.toolErrorRate * 100),
+                        label: "tool error rate",
+                        accent: .magenta
+                    )
+                }
+
+                SourceLine(text: cleanSourceLine(snapshot.sourceLine))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func projectTokensCard(snapshot: AnalyticsSnapshot) -> some View {
         EvidenceCard {
             VStack(alignment: .leading, spacing: 12) {
-                Eyebrow(text: "tokens by project (top 8)")
+                Eyebrow(text: "tokens and cost by project (top 8)")
 
                 if snapshot.perProject.isEmpty {
                     Text("// no project data")
@@ -191,6 +233,11 @@ struct AnalyticsView: View {
                             y: .value("project", bucket.key)
                         )
                         .foregroundStyle(Theme.Colors.magenta)
+                        .annotation(position: .trailing, alignment: .leading) {
+                            Text(usd(bucket.costUSD))
+                                .font(Theme.Fonts.mono(10))
+                                .foregroundStyle(Theme.Colors.textDim)
+                        }
                     }
                     .chartYScale(domain: snapshot.perProject.map(\.key))
                     .chartXAxis {
@@ -217,7 +264,7 @@ struct AnalyticsView: View {
     private func modelTokensCard(snapshot: AnalyticsSnapshot) -> some View {
         EvidenceCard {
             VStack(alignment: .leading, spacing: 12) {
-                Eyebrow(text: "tokens by model")
+                Eyebrow(text: "tokens and cost by model")
 
                 if snapshot.perModel.isEmpty {
                     Text("// no model data")
@@ -232,6 +279,11 @@ struct AnalyticsView: View {
                             y: .value("model", bucket.key)
                         )
                         .foregroundStyle(Theme.Colors.magenta)
+                        .annotation(position: .trailing, alignment: .leading) {
+                            Text(usd(bucket.costUSD))
+                                .font(Theme.Fonts.mono(10))
+                                .foregroundStyle(Theme.Colors.textDim)
+                        }
                     }
                     .chartYScale(domain: snapshot.perModel.map(\.key))
                     .chartXAxis {
@@ -248,6 +300,122 @@ struct AnalyticsView: View {
                     }
                     .frame(height: 180)
                 }
+
+                SourceLine(text: cleanSourceLine(snapshot.sourceLine))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func toolsCard(snapshot: AnalyticsSnapshot) -> some View {
+        EvidenceCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Eyebrow(text: "tools (top 10)")
+
+                if snapshot.perTool.isEmpty {
+                    Text("// no tool data")
+                        .font(Theme.Fonts.mono(11))
+                        .foregroundStyle(Theme.Colors.textDim)
+                        .frame(height: 180)
+                } else {
+                    let topTools = Array(snapshot.perTool.prefix(10))
+                    Chart(topTools) { tool in
+                        BarMark(
+                            x: .value("calls", tool.calls),
+                            y: .value("name", tool.name),
+                            stacking: .unstacked
+                        )
+                        .foregroundStyle(Theme.Colors.magenta)
+
+                        BarMark(
+                            x: .value("errors", tool.errors),
+                            y: .value("name", tool.name),
+                            stacking: .unstacked
+                        )
+                        .foregroundStyle(Theme.Colors.magentaBright)
+                    }
+                    .chartYScale(domain: topTools.map(\.name))
+                    .chartXAxis {
+                        AxisMarks {
+                            AxisGridLine().foregroundStyle(Theme.Colors.line)
+                            AxisValueLabel().font(Theme.Fonts.mono(10)).foregroundStyle(Theme.Colors.textDim)
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks {
+                            AxisGridLine().foregroundStyle(Theme.Colors.line)
+                            AxisValueLabel().font(Theme.Fonts.mono(10)).foregroundStyle(Theme.Colors.textDim)
+                        }
+                    }
+                    .frame(height: 200)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("tool")
+                                .frame(width: 160, alignment: .leading)
+                            Text("calls")
+                                .frame(width: 64, alignment: .trailing)
+                            Text("errors")
+                                .frame(width: 64, alignment: .trailing)
+                            Text("median")
+                                .frame(width: 64, alignment: .trailing)
+                        }
+                        .foregroundStyle(Theme.Colors.textDim)
+
+                        ForEach(topTools) { tool in
+                            HStack(spacing: 8) {
+                                Text(tool.name)
+                                    .frame(width: 160, alignment: .leading)
+                                Text("\(tool.calls)")
+                                    .frame(width: 64, alignment: .trailing)
+                                Text("\(tool.errors)")
+                                    .frame(width: 64, alignment: .trailing)
+                                Text(HistoryFormat.duration(ms: tool.medianDurationMs))
+                                    .frame(width: 64, alignment: .trailing)
+                            }
+                            .foregroundStyle(Theme.Colors.text)
+                        }
+                    }
+                    .font(Theme.Fonts.mono(11))
+                }
+
+                SourceLine(text: cleanSourceLine(snapshot.sourceLine))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func hourCard(snapshot: AnalyticsSnapshot) -> some View {
+        EvidenceCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Eyebrow(text: "tokens by hour of day")
+
+                Chart(Array(snapshot.perHour.enumerated()), id: \.offset) { index, tokens in
+                    BarMark(
+                        x: .value("hour", index),
+                        y: .value("tokens", tokens)
+                    )
+                    .foregroundStyle(Theme.Colors.magenta)
+                }
+                .chartXAxis {
+                    AxisMarks(values: [0, 6, 12, 18]) { value in
+                        AxisGridLine().foregroundStyle(Theme.Colors.line)
+                        AxisValueLabel {
+                            if let hour = value.as(Int.self) {
+                                Text(String(format: "%02d", hour))
+                                    .font(Theme.Fonts.mono(10))
+                                    .foregroundStyle(Theme.Colors.textDim)
+                            }
+                        }
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks {
+                        AxisGridLine().foregroundStyle(Theme.Colors.line)
+                        AxisValueLabel().font(Theme.Fonts.mono(10)).foregroundStyle(Theme.Colors.textDim)
+                    }
+                }
+                .frame(height: 140)
 
                 SourceLine(text: cleanSourceLine(snapshot.sourceLine))
             }
