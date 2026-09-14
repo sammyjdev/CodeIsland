@@ -258,4 +258,34 @@ import Testing
         manager.handleEvent("SessionStart")
         #expect(manager.lastVolume == 0.25)
     }
+
+    // Required F6: judgeSettingsDefaultsAndPersistence
+    @Test @MainActor func judgeSettingsDefaultsAndPersistence() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.judgeBinaryPath.hasSuffix("/.local/bin/claude"))
+        #expect(settings.judgeModel == "sonnet")
+
+        settings.judgeBinaryPath = "/custom/bin/claude"
+        settings.judgeModel = "opus"
+
+        let reloaded = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded.judgeBinaryPath == "/custom/bin/claude")
+        #expect(reloaded.judgeModel == "opus")
+
+        // Setting "" or "   " leaves the previous value
+        reloaded.judgeBinaryPath = ""
+        reloaded.judgeModel = "   "
+        #expect(reloaded.judgeBinaryPath == "/custom/bin/claude")
+        #expect(reloaded.judgeModel == "opus")
+
+        reloaded.judgeBinaryPath = "   "
+        reloaded.judgeModel = ""
+        #expect(reloaded.judgeBinaryPath == "/custom/bin/claude")
+        #expect(reloaded.judgeModel == "opus")
+    }
 }
+

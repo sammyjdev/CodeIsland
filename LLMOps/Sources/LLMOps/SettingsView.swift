@@ -23,6 +23,7 @@ struct SettingsView: View {
                 profilesCard
                 soundsCard
                 liveCard
+                judgeCard
                 hookServerCard
             }
             .padding(24)
@@ -469,6 +470,71 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.Colors.text)
                 .toggleStyle(.switch)
                 .tint(Theme.Colors.magenta)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Judge Card
+
+    private var judgeCard: some View {
+        EvidenceCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Eyebrow("judge")
+
+                HStack(spacing: 12) {
+                    Text("claude binary")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    TextField("", text: Binding(
+                        get: { model.settings.judgeBinaryPath },
+                        set: { model.settings.judgeBinaryPath = $0 }
+                    ))
+                    .font(Theme.Fonts.mono(12))
+                    .foregroundStyle(Theme.Colors.text)
+                    .textFieldStyle(.plain)
+                    .frame(width: 260)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(Theme.Colors.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                            .stroke(Theme.Colors.line, lineWidth: 1)
+                    )
+                }
+
+                HStack(spacing: 12) {
+                    Text("model")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    TextField("", text: Binding(
+                        get: { model.settings.judgeModel },
+                        set: { model.settings.judgeModel = $0 }
+                    ))
+                    .font(Theme.Fonts.mono(12))
+                    .foregroundStyle(Theme.Colors.text)
+                    .textFieldStyle(.plain)
+                    .frame(width: 260)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(Theme.Colors.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                            .stroke(Theme.Colors.line, lineWidth: 1)
+                    )
+                }
+
+                Text("runs with -p --no-session-persistence, nothing is written to ~/.claude")
+                    .font(Theme.Fonts.mono(11))
+                    .foregroundStyle(Theme.Colors.textDim)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

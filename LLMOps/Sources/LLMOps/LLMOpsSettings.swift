@@ -20,6 +20,36 @@ public final class LLMOpsSettings {
         public static let hideIdleAfterSeconds = "llmops.live.hideIdleAfterSeconds"   // default 300
         public static let soundVolume = "llmops.sound.volume"                         // default 60
         public static let bringToFrontOnRequest = "llmops.live.bringToFrontOnRequest" // default true
+        public static let judgeBinaryPath = "llmops.judge.binaryPath"   // default: NSHomeDirectory() + "/.local/bin/claude"
+        public static let judgeModel = "llmops.judge.model"             // default: "sonnet"
+    }
+
+    public var judgeBinaryPath: String {
+        get {
+            access(keyPath: \.judgeBinaryPath)
+            return defaults.string(forKey: Key.judgeBinaryPath) ?? (NSHomeDirectory() + "/.local/bin/claude")
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            withMutation(keyPath: \.judgeBinaryPath) {
+                defaults.set(newValue, forKey: Key.judgeBinaryPath)
+            }
+        }
+    }
+
+    public var judgeModel: String {
+        get {
+            access(keyPath: \.judgeModel)
+            return defaults.string(forKey: Key.judgeModel) ?? "sonnet"
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            withMutation(keyPath: \.judgeModel) {
+                defaults.set(newValue, forKey: Key.judgeModel)
+            }
+        }
     }
 
     public var hideIdleAfterSeconds: Int {
