@@ -574,8 +574,47 @@ private func formatUSD(_ v: Double) -> String {
     }
 }
 
+public struct OpenRouterTopUp: Equatable, Sendable, Codable {
+    public var seenTotalCredits: Double   // last total_credits observed, 0 = never
+    public var amount: Double             // last top-up in USD, 0 = unknown
+    public var at: Date?                  // when the top-up was detected or entered by hand
+    public init(seenTotalCredits: Double = 0, amount: Double = 0, at: Date? = nil) {
+        self.seenTotalCredits = seenTotalCredits
+        self.amount = amount
+        self.at = at
+    }
+
+    /// Pure. Returns the ledger after observing `totalCredits` at `now`.
+    /// - first observation (seenTotalCredits == 0): only records seenTotalCredits, amount and at unchanged
+    /// - totalCredits > seenTotalCredits: amount = totalCredits - seenTotalCredits, at = now, seen updated
+    /// - otherwise: unchanged except seenTotalCredits = totalCredits
+    public func observing(totalCredits: Double, now: Date) -> OpenRouterTopUp {
+        if seenTotalCredits == 0 {
+            return OpenRouterTopUp(seenTotalCredits: totalCredits, amount: amount, at: at)
+        } else if totalCredits > seenTotalCredits {
+            return OpenRouterTopUp(seenTotalCredits: totalCredits, amount: totalCredits - seenTotalCredits, at: now)
+        } else {
+            return OpenRouterTopUp(seenTotalCredits: totalCredits, amount: amount, at: at)
+        }
+    }
+}
+
 public enum OpenRouterQuotaParser {
-    public static func parse(creditsData: Data, keyData: Data, now: Date) throws -> QuotaSnapshot {
+    public static func totalCredits(from creditsData: Data) throws -> Double {
+        guard let creditsJson = try? JSONSerialization.jsonObject(with: creditsData) as? [String: Any],
+              let creditsDict = creditsJson["data"] as? [String: Any],
+              let totalCredits = (creditsDict["total_credits"] as? NSNumber)?.doubleValue else {
+            throw QuotaError.badPayload("missing data.total_credits in credits response")
+        }
+        return totalCredits
+    }
+
+    public static func parse(
+        creditsData: Data,
+        keyData: Data,
+        now: Date,
+        topUp: OpenRouterTopUp = OpenRouterTopUp()
+    ) throws -> QuotaSnapshot {
         guard let creditsJson = try? JSONSerialization.jsonObject(with: creditsData) as? [String: Any],
               let creditsDict = creditsJson["data"] as? [String: Any],
               let totalCredits = (creditsDict["total_credits"] as? NSNumber)?.doubleValue,
@@ -593,7 +632,30 @@ public enum OpenRouterQuotaParser {
 
         var windows: [QuotaWindow] = []
 
-        let creditsUsedPercent = totalCredits <= 0 ? 0.0 : (totalUsage / totalCredits) * 100.0
+        let creditsUsedPercent: Double
+        let detail: String
+        let remaining = max(0, totalCredits - totalUsage)
+
+        if topUp.amount > 0 {
+            let pct = ((topUp.amount - remaining) / topUp.amount) * 100.0
+            creditsUsedPercent = min(100.0, max(0.0, pct))
+
+            let loadedFragment: String
+            if let at = topUp.at {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd"
+                formatter.calendar = Calendar.current
+                formatter.timeZone = TimeZone.current
+                loadedFragment = " loaded \(formatter.string(from: at))"
+            } else {
+                loadedFragment = ""
+            }
+            detail = "\(formatUSD(remaining)) left of \(formatUSD(topUp.amount))\(loadedFragment), today \(formatUSD(usageDaily)), week \(formatUSD(usageWeekly)), month \(formatUSD(usageMonthly))"
+        } else {
+            creditsUsedPercent = totalCredits <= 0 ? 0.0 : (totalUsage / totalCredits) * 100.0
+            detail = "\(formatUSD(remaining)) left of \(formatUSD(totalCredits)), today \(formatUSD(usageDaily)), week \(formatUSD(usageWeekly)), month \(formatUSD(usageMonthly))"
+        }
+
         windows.append(QuotaWindow(label: "credits", usedPercent: creditsUsedPercent, resetsAt: nil))
 
         if let limitNum = (keyDict["limit"] as? NSNumber)?.doubleValue, limitNum > 0 {
@@ -604,9 +666,6 @@ public enum OpenRouterQuotaParser {
             let limitUsedPercent = ((limitNum - limitRemaining) / limitNum) * 100.0
             windows.append(QuotaWindow(label: "key limit (\(limitReset))", usedPercent: limitUsedPercent, resetsAt: nil))
         }
-
-        let remaining = max(0, totalCredits - totalUsage)
-        let detail = "\(formatUSD(remaining)) left of \(formatUSD(totalCredits)), today \(formatUSD(usageDaily)), week \(formatUSD(usageWeekly)), month \(formatUSD(usageMonthly))"
 
         return QuotaSnapshot(provider: .openrouter, windows: windows, fetchedAt: now, detail: detail)
     }
@@ -663,13 +722,19 @@ public struct OpenRouterQuotaProvider: QuotaProvider {
     public let id: QuotaProviderID = .openrouter
     public var keyLoader: @Sendable () throws -> String
     public var request: @Sendable (URLRequest) async throws -> Data
+    public var topUpLoader: @Sendable () -> OpenRouterTopUp = { OpenRouterTopUp() }
+    public var topUpSink: @Sendable (OpenRouterTopUp) -> Void = { _ in }
 
     public init(
         keyLoader: @escaping @Sendable () throws -> String = { try OpenRouterKey.load() },
-        request: @escaping @Sendable (URLRequest) async throws -> Data = OpenRouterQuotaProvider.defaultRequest
+        request: @escaping @Sendable (URLRequest) async throws -> Data = OpenRouterQuotaProvider.defaultRequest,
+        topUpLoader: @escaping @Sendable () -> OpenRouterTopUp = { OpenRouterTopUp() },
+        topUpSink: @escaping @Sendable (OpenRouterTopUp) -> Void = { _ in }
     ) {
         self.keyLoader = keyLoader
         self.request = request
+        self.topUpLoader = topUpLoader
+        self.topUpSink = topUpSink
     }
 
     public static let defaultRequest: @Sendable (URLRequest) async throws -> Data = { req in
@@ -727,6 +792,13 @@ public struct OpenRouterQuotaProvider: QuotaProvider {
             throw QuotaError.network(error.localizedDescription)
         }
 
-        return try OpenRouterQuotaParser.parse(creditsData: creditsData, keyData: keyData, now: now)
+        let total = try OpenRouterQuotaParser.totalCredits(from: creditsData)
+        let loaded = topUpLoader()
+        let ledger = loaded.observing(totalCredits: total, now: now)
+        if ledger != loaded {
+            topUpSink(ledger)
+        }
+
+        return try OpenRouterQuotaParser.parse(creditsData: creditsData, keyData: keyData, now: now, topUp: ledger)
     }
 }

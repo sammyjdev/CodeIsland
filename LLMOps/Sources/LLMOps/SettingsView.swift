@@ -664,6 +664,20 @@ struct SettingsView: View {
                     .font(Theme.Fonts.mono(11))
                     .foregroundStyle(Theme.Colors.textDim)
 
+                HStack(spacing: 12) {
+                    Text("last top-up (USD)")
+                        .font(Theme.Fonts.mono(11))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    OpenRouterTopUpField(model: model)
+                }
+
+                Text("detected automatically when total credits grow; set by hand for the first load")
+                    .font(Theme.Fonts.mono(10))
+                    .foregroundStyle(Theme.Colors.textDim)
+
                 Text("claude token from the keychain, codex from ~/.codex/sessions")
                     .font(Theme.Fonts.mono(11))
                     .foregroundStyle(Theme.Colors.textDim)
@@ -822,6 +836,71 @@ struct OpenRouterKeyField: View {
                     OpenRouterKey.delete()
                 } else {
                     try? OpenRouterKey.store(box.text)
+                }
+                Task {
+                    await model.quotas.refresh(providers: model.quotaProviders())
+                }
+            }
+    }
+}
+
+final class OpenRouterTopUpBox: ObservableObject {
+    @Published var text: String = ""
+
+    init(text: String = "") {
+        self.text = text
+    }
+}
+
+struct OpenRouterTopUpField: View {
+    var model: AppModel
+    @StateObject private var box = OpenRouterTopUpBox()
+
+    var body: some View {
+        TextField("10.00", text: $box.text)
+            .font(Theme.Fonts.mono(12))
+            .foregroundStyle(Theme.Colors.text)
+            .textFieldStyle(.plain)
+            .frame(width: 260)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(Theme.Colors.bg)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                    .stroke(Theme.Colors.line, lineWidth: 1)
+            )
+            .onAppear {
+                let current = model.settings.openRouterTopUp
+                if current.amount > 0 && box.text.isEmpty {
+                    box.text = current.amount.truncatingRemainder(dividingBy: 1) == 0
+                        ? String(format: "%.0f", current.amount)
+                        : String(current.amount)
+                }
+            }
+            .onSubmit {
+                let trimmed = box.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let current = model.settings.openRouterTopUp
+                if trimmed.isEmpty {
+                    model.settings.openRouterTopUp = OpenRouterTopUp(
+                        seenTotalCredits: current.seenTotalCredits,
+                        amount: 0,
+                        at: nil
+                    )
+                } else if let val = Double(trimmed) {
+                    if val > 0 {
+                        model.settings.openRouterTopUp = OpenRouterTopUp(
+                            seenTotalCredits: current.seenTotalCredits,
+                            amount: val,
+                            at: Date()
+                        )
+                    } else if val == 0 {
+                        model.settings.openRouterTopUp = OpenRouterTopUp(
+                            seenTotalCredits: current.seenTotalCredits,
+                            amount: 0,
+                            at: nil
+                        )
+                    }
                 }
                 Task {
                     await model.quotas.refresh(providers: model.quotaProviders())

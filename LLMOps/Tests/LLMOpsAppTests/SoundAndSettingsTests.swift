@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import LLMOpsCore
 @testable import LLMOps
 
 @Suite struct SoundAndSettingsTests {
@@ -365,5 +366,30 @@ import Testing
         let reloaded = LLMOpsSettings(userDefaults: defaults)
         #expect(reloaded.islandVisibility == .whileLive)
         #expect(reloaded.mascotSpeed == 150)
+    }
+
+    // 8. openRouterTopUp defaults to OpenRouterTopUp(), persists across instances, and garbage Data yields default
+    @Test @MainActor func openRouterTopUpDefaultsPersistenceAndGarbageData() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.openRouterTopUp == OpenRouterTopUp())
+
+        let sample = OpenRouterTopUp(
+            seenTotalCredits: 74.0,
+            amount: 24.0,
+            at: Date(timeIntervalSince1970: 1789300000)
+        )
+        settings.openRouterTopUp = sample
+
+        let reloaded = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded.openRouterTopUp == sample)
+
+        // Corrupted / garbage Data under the key yields the default
+        defaults.set(Data("garbage data".utf8), forKey: LLMOpsSettings.Key.openRouterTopUp)
+        let corrupted = LLMOpsSettings(userDefaults: defaults)
+        #expect(corrupted.openRouterTopUp == OpenRouterTopUp())
     }
 }

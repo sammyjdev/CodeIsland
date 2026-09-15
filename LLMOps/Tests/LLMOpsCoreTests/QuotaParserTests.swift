@@ -581,6 +581,168 @@ struct QuotaParserTests {
             #expect(Bool(false), "Expected missingCredential, got \(error)")
         }
     }
+
+    // 15. OpenRouterTopUp observing lifecycle
+    @Test("OpenRouterTopUp: first observation records seen only, growth sets amount and at, equal or lower keeps amount and at")
+    func openRouterTopUpObservingLifecycle() {
+        let t0 = fixedNow
+        let t1 = Date(timeIntervalSince1970: 1789303600)
+        let t2 = Date(timeIntervalSince1970: 1789307200)
+
+        // First observation (seenTotalCredits == 0): records seenTotalCredits, amount and at unchanged
+        let initial = OpenRouterTopUp(seenTotalCredits: 0, amount: 0, at: nil)
+        let afterFirst = initial.observing(totalCredits: 50, now: t0)
+        #expect(afterFirst.seenTotalCredits == 50)
+        #expect(afterFirst.amount == 0)
+        #expect(afterFirst.at == nil)
+
+        // First observation with pre-set amount (e.g. entered by hand)
+        let manual = OpenRouterTopUp(seenTotalCredits: 0, amount: 15, at: t0)
+        let afterManualFirst = manual.observing(totalCredits: 50, now: t1)
+        #expect(afterManualFirst.seenTotalCredits == 50)
+        #expect(afterManualFirst.amount == 15)
+        #expect(afterManualFirst.at == t0)
+
+        // Growth (totalCredits > seenTotalCredits): amount = totalCredits - seenTotalCredits, at = now
+        let afterGrowth = afterFirst.observing(totalCredits: 74, now: t1)
+        #expect(afterGrowth.seenTotalCredits == 74)
+        #expect(afterGrowth.amount == 24)
+        #expect(afterGrowth.at == t1)
+
+        // Equal (totalCredits == seenTotalCredits): unchanged except seenTotalCredits = totalCredits
+        let afterEqual = afterGrowth.observing(totalCredits: 74, now: t2)
+        #expect(afterEqual.seenTotalCredits == 74)
+        #expect(afterEqual.amount == 24)
+        #expect(afterEqual.at == t1)
+
+        // Lower (totalCredits < seenTotalCredits): amount and at kept, seen updated
+        let afterLower = afterGrowth.observing(totalCredits: 70, now: t2)
+        #expect(afterLower.seenTotalCredits == 70)
+        #expect(afterLower.amount == 24)
+        #expect(afterLower.at == t1)
+    }
+
+    // 16. OpenRouter parse with topUp
+    @Test("OpenRouter: parse with topUp calculates usedPercent from amount and formats loaded date")
+    func openRouterParseWithTopUp() throws {
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":69.353701717}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":null,"limit_reset":"daily","limit_remaining":null,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+        let topUp = OpenRouterTopUp(seenTotalCredits: 74, amount: 10, at: fixedNow)
+        let snapshot = try OpenRouterQuotaParser.parse(
+            creditsData: Data(creditsPayload.utf8),
+            keyData: Data(keyPayload.utf8),
+            now: fixedNow,
+            topUp: topUp
+        )
+
+        let creditsWindow = try #require(snapshot.windows.first(where: { $0.label == "credits" }))
+        #expect(abs(creditsWindow.usedPercent - 53.5) < 0.1)
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.calendar = Calendar.current
+        df.timeZone = TimeZone.current
+        let expectedDate = df.string(from: fixedNow)
+        let expectedPrefix = "$4.65 left of $10.00 loaded \(expectedDate)"
+        let detail = try #require(snapshot.detail)
+        #expect(detail.hasPrefix(expectedPrefix))
+        #expect(detail == "$4.65 left of $10.00 loaded \(expectedDate), today $0.0000, week $0.0079, month $0.0583")
+    }
+
+    // 17. OpenRouter parse with amount and nil date omits loaded fragment
+    @Test("OpenRouter: parse with amount and nil date omits loaded fragment")
+    func openRouterParseNilDateOmitted() throws {
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":69.353701717}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":null,"limit_reset":"daily","limit_remaining":null,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+        let topUp = OpenRouterTopUp(seenTotalCredits: 74, amount: 10, at: nil)
+        let snapshot = try OpenRouterQuotaParser.parse(
+            creditsData: Data(creditsPayload.utf8),
+            keyData: Data(keyPayload.utf8),
+            now: fixedNow,
+            topUp: topUp
+        )
+
+        let detail = try #require(snapshot.detail)
+        #expect(!detail.contains("loaded"))
+        #expect(detail == "$4.65 left of $10.00, today $0.0000, week $0.0079, month $0.0583")
+    }
+
+    // 18. OpenRouter parse remaining above amount clamps usedPercent to zero
+    @Test("OpenRouter: parse with remaining above amount clamps usedPercent to zero")
+    func openRouterParseRemainingAboveAmountClampsUsedPercentToZero() throws {
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":60}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":null,"limit_reset":"daily","limit_remaining":null,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+        let topUp = OpenRouterTopUp(seenTotalCredits: 74, amount: 10, at: nil)
+        let snapshot = try OpenRouterQuotaParser.parse(
+            creditsData: Data(creditsPayload.utf8),
+            keyData: Data(keyPayload.utf8),
+            now: fixedNow,
+            topUp: topUp
+        )
+
+        let creditsWindow = try #require(snapshot.windows.first(where: { $0.label == "credits" }))
+        #expect(creditsWindow.usedPercent == 0.0)
+    }
+
+    // 19. OpenRouterQuotaProvider top-up tracking and sink invocation
+    @Test("OpenRouterQuotaProvider: top-up tracking invokes sink on growth and skips on identical ledger")
+    func openRouterQuotaProviderTopUpTracking() async throws {
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":69.353701717}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":null,"limit_reset":"daily","limit_remaining":null,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+
+        final class TopUpBox: @unchecked Sendable {
+            var current: OpenRouterTopUp
+            var sinkCalls: [OpenRouterTopUp] = []
+            init(current: OpenRouterTopUp) {
+                self.current = current
+            }
+        }
+
+        let box = TopUpBox(current: OpenRouterTopUp(seenTotalCredits: 50, amount: 0, at: nil))
+
+        let provider = OpenRouterQuotaProvider(
+            keyLoader: { "k" },
+            request: { req in
+                if req.url?.path == "/api/v1/credits" {
+                    return Data(creditsPayload.utf8)
+                } else {
+                    return Data(keyPayload.utf8)
+                }
+            },
+            topUpLoader: { box.current },
+            topUpSink: { newLedger in
+                box.sinkCalls.append(newLedger)
+                box.current = newLedger
+            }
+        )
+
+        // First fetch: total_credits is 74, previous seen was 50 -> sink receives amount 24, seen 74, at == fixedNow
+        _ = try await provider.fetch(now: fixedNow)
+        #expect(box.sinkCalls.count == 1)
+        #expect(box.sinkCalls[0].seenTotalCredits == 74)
+        #expect(box.sinkCalls[0].amount == 24)
+        #expect(box.sinkCalls[0].at == fixedNow)
+
+        // Second fetch: total_credits is still 74, seen is 74 -> ledger does not differ, sink not called
+        _ = try await provider.fetch(now: fixedNow)
+        #expect(box.sinkCalls.count == 1)
+    }
 }
 
 private actor CapturedRequest {

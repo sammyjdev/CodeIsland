@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import LLMOpsCore
 
 @MainActor @Observable
 public final class LLMOpsSettings {
@@ -27,6 +28,31 @@ public final class LLMOpsSettings {
         public static let zaiAuthPath = "llmops.quotas.zaiAuthPath"
         public static let islandVisibility = "llmops.island.visibility"
         public static let mascotSpeed = "llmops.island.mascotSpeed"
+        public static let openRouterTopUp = "llmops.openrouter.topUp"
+    }
+
+    /// Decode-or-default, callable off the main actor (UserDefaults is thread-safe)
+    /// so the quota provider always reads the current value, not a launch snapshot.
+    public nonisolated static func openRouterTopUp(in defaults: UserDefaults) -> OpenRouterTopUp {
+        guard let data = defaults.data(forKey: Key.openRouterTopUp),
+              let value = try? JSONDecoder().decode(OpenRouterTopUp.self, from: data) else {
+            return OpenRouterTopUp()
+        }
+        return value
+    }
+
+    public var openRouterTopUp: OpenRouterTopUp {
+        get {
+            access(keyPath: \.openRouterTopUp)
+            return Self.openRouterTopUp(in: defaults)
+        }
+        set {
+            withMutation(keyPath: \.openRouterTopUp) {
+                if let data = try? JSONEncoder().encode(newValue) {
+                    defaults.set(data, forKey: Key.openRouterTopUp)
+                }
+            }
+        }
     }
 
     /// Newest (by version string, descending) NSHomeDirectory()/.nvm/versions/node/*/bin/antigravity-usage that exists,
@@ -209,7 +235,7 @@ public final class LLMOpsSettings {
     }
 
     @ObservationIgnored
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
 
     public init(userDefaults: UserDefaults = .standard) {
         self.defaults = userDefaults

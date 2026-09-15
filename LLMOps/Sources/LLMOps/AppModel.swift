@@ -49,12 +49,21 @@ final class AppModel {
 
     func quotaProviders() -> [any QuotaProvider] {
         let zaiPath = settings.zaiAuthPath
+        let settings = self.settings
+        let defaults = settings.defaults
         return [
             ClaudeQuotaProvider(),
             CodexQuotaProvider(sessionsDirectory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")),
             AntigravityQuotaProvider(executablePath: settings.antigravityUsagePath),
             ZaiQuotaProvider(keyLoader: { try ZaiKey.fromOpencodeAuth(path: zaiPath) }),
-            OpenRouterQuotaProvider()
+            OpenRouterQuotaProvider(
+                topUpLoader: { LLMOpsSettings.openRouterTopUp(in: defaults) },
+                topUpSink: { topUp in
+                    Task { @MainActor in
+                        settings.openRouterTopUp = topUp
+                    }
+                }
+            )
         ]
     }
 
