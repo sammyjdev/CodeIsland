@@ -109,7 +109,7 @@ import Testing
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let settings = LLMOpsSettings(userDefaults: defaults)
-        let manager = SoundManager(settings: settings)
+        let manager = SoundManager(settings: settings, audioEnabled: false)
         manager.audioEnabled = false
 
         // handleEvent("PermissionRequest") sets lastPlayed == "8bit_approval"
@@ -118,7 +118,7 @@ import Testing
 
         // with soundApprovalNeeded = false it stays nil
         settings.soundApprovalNeeded = false
-        let manager2 = SoundManager(settings: settings)
+        let manager2 = SoundManager(settings: settings, audioEnabled: false)
         manager2.audioEnabled = false
         manager2.handleEvent("PermissionRequest")
         #expect(manager2.lastPlayed == nil)
@@ -126,7 +126,7 @@ import Testing
         // with soundEnabled = false nothing plays for any event
         settings.soundApprovalNeeded = true
         settings.soundEnabled = false
-        let manager3 = SoundManager(settings: settings)
+        let manager3 = SoundManager(settings: settings, audioEnabled: false)
         manager3.audioEnabled = false
         for event in ["SessionStart", "TaskRoundComplete", "Stop", "PostToolUseFailure", "PermissionRequest", "UserPromptSubmit"] {
             manager3.handleEvent(event)
@@ -135,19 +135,19 @@ import Testing
 
         // unknown event name plays nothing
         settings.soundEnabled = true
-        let manager4 = SoundManager(settings: settings)
+        let manager4 = SoundManager(settings: settings, audioEnabled: false)
         manager4.audioEnabled = false
         manager4.handleEvent("UnknownEvent")
         #expect(manager4.lastPlayed == nil)
 
         // playBoot plays 8bit_boot when enabled and nothing when soundBoot is false
-        let bootManager = SoundManager(settings: settings)
+        let bootManager = SoundManager(settings: settings, audioEnabled: false)
         bootManager.audioEnabled = false
         bootManager.playBoot()
         #expect(bootManager.lastPlayed == "8bit_boot")
 
         settings.soundBoot = false
-        let bootManagerDisabled = SoundManager(settings: settings)
+        let bootManagerDisabled = SoundManager(settings: settings, audioEnabled: false)
         bootManagerDisabled.audioEnabled = false
         bootManagerDisabled.playBoot()
         #expect(bootManagerDisabled.lastPlayed == nil)
@@ -252,7 +252,7 @@ import Testing
         let settings = LLMOpsSettings(userDefaults: defaults)
         settings.soundVolume = 25
 
-        let manager = SoundManager(settings: settings)
+        let manager = SoundManager(settings: settings, audioEnabled: false)
         manager.audioEnabled = false
 
         manager.handleEvent("SessionStart")

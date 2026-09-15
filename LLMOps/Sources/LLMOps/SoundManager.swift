@@ -41,9 +41,16 @@ public final class SoundManager {
     /// For tests: when false, resolve the file and record `lastPlayed` without touching NSSound.
     public var audioEnabled: Bool
 
+    /// ponytail: the test bundle must never reach NSSound. Every `./test.sh` run used to play
+    /// the real 8bit wavs through AppModel and SoundManager fixtures, which the owner heard as
+    /// "the app plays sounds while disabled". Tests can still opt in explicitly.
+    nonisolated public static var defaultAudioEnabled: Bool {
+        !Bundle.main.bundlePath.hasSuffix(".xctest")
+    }
+
     public init(
         settings: LLMOpsSettings,
-        audioEnabled: Bool = true,
+        audioEnabled: Bool = SoundManager.defaultAudioEnabled,
         nowProvider: @escaping () -> Date = Date.init
     ) {
         self.settings = settings
