@@ -324,3 +324,4 @@ Owner request: stop activating the app on requests; show a popup at the notch, l
 - Tests: `NotchPanelControllerTests` with an injected `LiveStore` (pending added via the store API): panel `isVisible` becomes true after a pending item, false after `resolve`; frame origin x equals the screen center minus half the width; the panel style mask contains `.nonactivatingPanel`. `LLMOpsSettings` tests for the enum default and the legacy mapping. `AppModelTests`: `.front` calls the injected activator, `.notch` and `.none` do not.
 
 Out of scope: notch for metrics or sounds, per provider multiple accounts, quota alerts.
+- S6 landed as 90cd1be (providers) and the quotas screen commit; S7 as 6f7d398. 202 tests in 20 suites. Sound report root cause (bf4c004): the test bundle played the real wavs through SoundManager fixtures; the app never played while disabled.
