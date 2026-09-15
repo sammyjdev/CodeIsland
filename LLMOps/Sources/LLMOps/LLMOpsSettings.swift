@@ -186,7 +186,7 @@ public final class LLMOpsSettings {
                let visibility = IslandVisibility(rawValue: raw) {
                 return visibility
             }
-            return .whileLive
+            return .onlyPending
         }
         set {
             withMutation(keyPath: \.islandVisibility) {

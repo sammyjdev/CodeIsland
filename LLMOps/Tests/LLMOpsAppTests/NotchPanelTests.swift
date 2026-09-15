@@ -31,9 +31,6 @@ struct NotchPanelTests {
 
         let model = AppModel(userDefaults: userDefaults)
         defer { model.stopPeriodicRescan() }
-        // The default whileLive keeps the island up while the session lives;
-        // this test is about pending items, so pin the pending-only mode.
-        model.settings.islandVisibility = .onlyPending
 
         let controller = NotchPanelController(model: model)
         controller.start()
@@ -119,7 +116,7 @@ struct NotchPanelTests {
 
         let model = AppModel(userDefaults: userDefaults)
         defer { model.stopPeriodicRescan() }
-        #expect(model.settings.islandVisibility == .whileLive)
+        model.settings.islandVisibility = .whileLive
 
         let controller = NotchPanelController(model: model)
         controller.start()

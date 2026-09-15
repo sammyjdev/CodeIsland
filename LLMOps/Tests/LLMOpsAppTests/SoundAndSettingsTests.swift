@@ -342,7 +342,7 @@ import Testing
         #expect(reloaded.zaiAuthPath == "/custom/share/auth.json")
     }
 
-    // 7. islandVisibility defaults to .whileLive and persists;
+    // 7. islandVisibility defaults to .onlyPending and persists;
     // mascotSpeed defaults to 100, clamps 10 -> 25 and 999 -> 300, persists.
     @Test @MainActor func islandVisibilityAndMascotSpeedSettings() throws {
         let suite = "test-\(UUID().uuidString)"
@@ -350,7 +350,7 @@ import Testing
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let settings = LLMOpsSettings(userDefaults: defaults)
-        #expect(settings.islandVisibility == .whileLive)
+        #expect(settings.islandVisibility == .onlyPending)
         #expect(settings.mascotSpeed == 100)
 
         settings.mascotSpeed = 10
@@ -360,10 +360,10 @@ import Testing
         #expect(settings.mascotSpeed == 300)
 
         settings.mascotSpeed = 150
-        settings.islandVisibility = .onlyPending
+        settings.islandVisibility = .whileLive
 
         let reloaded = LLMOpsSettings(userDefaults: defaults)
-        #expect(reloaded.islandVisibility == .onlyPending)
+        #expect(reloaded.islandVisibility == .whileLive)
         #expect(reloaded.mascotSpeed == 150)
     }
 }
