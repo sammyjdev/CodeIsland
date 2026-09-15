@@ -2,12 +2,14 @@ import Foundation
 
 public enum QuotaProviderID: String, CaseIterable, Sendable, Codable {
     case claude, codex, antigravity, zai
+    case openrouter
     public var displayName: String {
         switch self {
         case .claude: return "claude"
         case .codex: return "codex"
         case .antigravity: return "antigravity"
         case .zai: return "z.ai"
+        case .openrouter: return "openrouter"
         }
     }
 }
@@ -267,32 +269,47 @@ public enum ZaiQuotaParser {
     }
 }
 
+private func runSecurity(arguments: [String]) throws -> (status: Int32, stdout: String, stderr: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+    process.arguments = arguments
+
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+
+    do {
+        try process.run()
+    } catch {
+        throw QuotaError.subprocess("failed to run security: \(error.localizedDescription)")
+    }
+
+    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+
+    let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+    let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+    return (process.terminationStatus, stdout, stderr)
+}
+
 public enum KeychainToken {
     @Sendable
     public static func claudeCode() throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
+        let result: (status: Int32, stdout: String, stderr: String)
         do {
-            try process.run()
+            result = try runSecurity(arguments: ["find-generic-password", "-s", "Claude Code-credentials", "-w"])
         } catch {
             throw QuotaError.missingCredential("failed to run security: \(error.localizedDescription)")
         }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            throw QuotaError.missingCredential("security command exited with status \(process.terminationStatus)")
+        guard result.status == 0 else {
+            throw QuotaError.missingCredential("security command exited with status \(result.status)")
         }
 
-        guard let json = try? JSONSerialization.jsonObject(with: stdoutData) as? [String: Any],
+        guard let data = result.stdout.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = json["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String,
               !token.isEmpty else {
@@ -546,5 +563,170 @@ public struct ZaiQuotaProvider: QuotaProvider {
         }
 
         return try ZaiQuotaParser.parse(data, now: now)
+    }
+}
+
+private func formatUSD(_ v: Double) -> String {
+    if v < 1.0 {
+        return String(format: "$%.4f", v)
+    } else {
+        return String(format: "$%.2f", v)
+    }
+}
+
+public enum OpenRouterQuotaParser {
+    public static func parse(creditsData: Data, keyData: Data, now: Date) throws -> QuotaSnapshot {
+        guard let creditsJson = try? JSONSerialization.jsonObject(with: creditsData) as? [String: Any],
+              let creditsDict = creditsJson["data"] as? [String: Any],
+              let totalCredits = (creditsDict["total_credits"] as? NSNumber)?.doubleValue,
+              let totalUsage = (creditsDict["total_usage"] as? NSNumber)?.doubleValue else {
+            throw QuotaError.badPayload("missing data.total_credits or data.total_usage in credits response")
+        }
+
+        guard let keyJson = try? JSONSerialization.jsonObject(with: keyData) as? [String: Any],
+              let keyDict = keyJson["data"] as? [String: Any],
+              let usageDaily = (keyDict["usage_daily"] as? NSNumber)?.doubleValue,
+              let usageWeekly = (keyDict["usage_weekly"] as? NSNumber)?.doubleValue,
+              let usageMonthly = (keyDict["usage_monthly"] as? NSNumber)?.doubleValue else {
+            throw QuotaError.badPayload("missing required key data fields")
+        }
+
+        var windows: [QuotaWindow] = []
+
+        let creditsUsedPercent = totalCredits <= 0 ? 0.0 : (totalUsage / totalCredits) * 100.0
+        windows.append(QuotaWindow(label: "credits", usedPercent: creditsUsedPercent, resetsAt: nil))
+
+        if let limitNum = (keyDict["limit"] as? NSNumber)?.doubleValue, limitNum > 0 {
+            guard let limitReset = keyDict["limit_reset"] as? String else {
+                throw QuotaError.badPayload("missing limit_reset for positive limit")
+            }
+            let limitRemaining = (keyDict["limit_remaining"] as? NSNumber)?.doubleValue ?? limitNum
+            let limitUsedPercent = ((limitNum - limitRemaining) / limitNum) * 100.0
+            windows.append(QuotaWindow(label: "key limit (\(limitReset))", usedPercent: limitUsedPercent, resetsAt: nil))
+        }
+
+        let remaining = max(0, totalCredits - totalUsage)
+        let detail = "\(formatUSD(remaining)) left of \(formatUSD(totalCredits)), today \(formatUSD(usageDaily)), week \(formatUSD(usageWeekly)), month \(formatUSD(usageMonthly))"
+
+        return QuotaSnapshot(provider: .openrouter, windows: windows, fetchedAt: now, detail: detail)
+    }
+}
+
+public enum OpenRouterKey {
+    public static let keychainService = "llmops.openrouter"
+
+    private static func readKeychain() -> String? {
+        guard let result = try? runSecurity(arguments: ["find-generic-password", "-s", keychainService, "-w"]),
+              result.status == 0 else {
+            return nil
+        }
+        let key = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? nil : key
+    }
+
+    public static func load(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        keychainReader: (() -> String?)? = nil
+    ) throws -> String {
+        let key = (keychainReader ?? readKeychain)()
+        if let key, !key.isEmpty {
+            return key
+        }
+        if let envKey = environment["OPENROUTER_API_KEY"], !envKey.isEmpty {
+            return envKey
+        }
+        throw QuotaError.missingCredential("set the OpenRouter key in settings")
+    }
+
+    public static func store(_ key: String) throws {
+        let result = try runSecurity(arguments: [
+            "add-generic-password", "-U",
+            "-s", keychainService,
+            "-a", "llmops",
+            "-w", key
+        ])
+        guard result.status == 0 else {
+            let err = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw QuotaError.subprocess(err)
+        }
+    }
+
+    public static func delete() {
+        _ = try? runSecurity(arguments: [
+            "delete-generic-password",
+            "-s", keychainService
+        ])
+    }
+}
+
+public struct OpenRouterQuotaProvider: QuotaProvider {
+    public let id: QuotaProviderID = .openrouter
+    public var keyLoader: @Sendable () throws -> String
+    public var request: @Sendable (URLRequest) async throws -> Data
+
+    public init(
+        keyLoader: @escaping @Sendable () throws -> String = { try OpenRouterKey.load() },
+        request: @escaping @Sendable (URLRequest) async throws -> Data = OpenRouterQuotaProvider.defaultRequest
+    ) {
+        self.keyLoader = keyLoader
+        self.request = request
+    }
+
+    public static let defaultRequest: @Sendable (URLRequest) async throws -> Data = { req in
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw QuotaError.network("invalid response")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw QuotaError.network("HTTP \(http.statusCode)")
+        }
+        return data
+    }
+
+    public func fetch(now: Date) async throws -> QuotaSnapshot {
+        let key: String
+        do {
+            key = try keyLoader()
+        } catch let err as QuotaError {
+            throw err
+        } catch {
+            throw QuotaError.missingCredential(error.localizedDescription)
+        }
+
+        guard let creditsURL = URL(string: "https://openrouter.ai/api/v1/credits") else {
+            throw QuotaError.network("invalid url")
+        }
+        var creditsReq = URLRequest(url: creditsURL)
+        creditsReq.httpMethod = "GET"
+        creditsReq.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        creditsReq.timeoutInterval = 15
+
+        let creditsData: Data
+        do {
+            creditsData = try await request(creditsReq)
+        } catch let err as QuotaError {
+            throw err
+        } catch {
+            throw QuotaError.network(error.localizedDescription)
+        }
+
+        guard let keyURL = URL(string: "https://openrouter.ai/api/v1/auth/key") else {
+            throw QuotaError.network("invalid url")
+        }
+        var keyReq = URLRequest(url: keyURL)
+        keyReq.httpMethod = "GET"
+        keyReq.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        keyReq.timeoutInterval = 15
+
+        let keyData: Data
+        do {
+            keyData = try await request(keyReq)
+        } catch let err as QuotaError {
+            throw err
+        } catch {
+            throw QuotaError.network(error.localizedDescription)
+        }
+
+        return try OpenRouterQuotaParser.parse(creditsData: creditsData, keyData: keyData, now: now)
     }
 }

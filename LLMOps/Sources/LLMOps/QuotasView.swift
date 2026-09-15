@@ -228,6 +228,7 @@ struct QuotasView: View {
         case .codex: return "~/.codex/sessions rollouts"
         case .antigravity: return "antigravity-usage quota --json"
         case .zai: return "api.z.ai quota/limit"
+        case .openrouter: return "openrouter.ai credits and auth/key"
         }
     }
 }

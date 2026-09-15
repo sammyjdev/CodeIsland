@@ -608,6 +608,20 @@ struct SettingsView: View {
                     )
                 }
 
+                HStack(spacing: 12) {
+                    Text("openrouter key")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    OpenRouterKeyField(model: model)
+                }
+
+                Text("stored in the keychain (llmops.openrouter), falls back to OPENROUTER_API_KEY")
+                    .font(Theme.Fonts.mono(11))
+                    .foregroundStyle(Theme.Colors.textDim)
+
                 Text("claude token from the keychain, codex from ~/.codex/sessions")
                     .font(Theme.Fonts.mono(11))
                     .foregroundStyle(Theme.Colors.textDim)
@@ -738,6 +752,41 @@ struct FlowWrapLayout: Layout {
 }
 
 // MARK: - Helpers
+
+final class OpenRouterKeyBox: ObservableObject {
+    @Published var text: String = ""
+}
+
+struct OpenRouterKeyField: View {
+    var model: AppModel
+    @StateObject private var box = OpenRouterKeyBox()
+
+    var body: some View {
+        SecureField("sk-or-...", text: $box.text)
+            .font(Theme.Fonts.mono(12))
+            .foregroundStyle(Theme.Colors.text)
+            .textFieldStyle(.plain)
+            .frame(width: 260)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(Theme.Colors.bg)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                    .stroke(Theme.Colors.line, lineWidth: 1)
+            )
+            .onSubmit {
+                if box.text.isEmpty {
+                    OpenRouterKey.delete()
+                } else {
+                    try? OpenRouterKey.store(box.text)
+                }
+                Task {
+                    await model.quotas.refresh(providers: model.quotaProviders())
+                }
+            }
+    }
+}
 
 extension PrimaryButton {
     init(_ title: String, action: @escaping () -> Void) {

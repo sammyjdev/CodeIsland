@@ -20,6 +20,7 @@ struct Sidebar: View {
             case .codex: label = "codex"
             case .antigravity: label = "agy"
             case .zai: label = "zai"
+            case .openrouter: label = "or"
             }
             let valueText: String
             if let pct = quotas.sidebarPercent(for: id) {

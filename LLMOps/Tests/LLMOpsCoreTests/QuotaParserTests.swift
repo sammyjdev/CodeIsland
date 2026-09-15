@@ -429,11 +429,170 @@ struct QuotaParserTests {
             #expect(Bool(false), "Expected QuotaError.subprocess, got \(error)")
         }
     }
+
+    // 11. OpenRouter sample parsing
+    @Test("OpenRouter: parse credits and key limit windows, detail formatting")
+    func openRouterSampleParsing() throws {
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":69.353701717}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":5,"limit_reset":"daily","limit_remaining":5,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+        let snapshot = try OpenRouterQuotaParser.parse(
+            creditsData: Data(creditsPayload.utf8),
+            keyData: Data(keyPayload.utf8),
+            now: fixedNow
+        )
+
+        #expect(snapshot.provider == .openrouter)
+        #expect(snapshot.windows.count == 2)
+        #expect(snapshot.windows[0].label == "credits")
+        #expect(abs(snapshot.windows[0].usedPercent - 93.7) < 0.1)
+        #expect(snapshot.windows[0].resetsAt == nil)
+
+        #expect(snapshot.windows[1].label == "key limit (daily)")
+        #expect(snapshot.windows[1].usedPercent == 0.0)
+        #expect(snapshot.windows[1].resetsAt == nil)
+
+        #expect(snapshot.detail == "$4.65 left of $74.00, today $0.0000, week $0.0079, month $0.0583")
+    }
+
+    // 12. OpenRouter null limits and edge cases
+    @Test("OpenRouter: null limits yields only credits window, zero total credits, missing data throws badPayload")
+    func openRouterNullLimitsAndEdgeCases() throws {
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":69.353701717}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":null,"limit_reset":"daily","limit_remaining":null,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+        let snap = try OpenRouterQuotaParser.parse(
+            creditsData: Data(creditsPayload.utf8),
+            keyData: Data(keyPayload.utf8),
+            now: fixedNow
+        )
+        #expect(snap.windows.count == 1)
+        #expect(snap.windows[0].label == "credits")
+
+        let zeroCreditsPayload = """
+        {"data":{"total_credits":0,"total_usage":0}}
+        """
+        let zeroSnap = try OpenRouterQuotaParser.parse(
+            creditsData: Data(zeroCreditsPayload.utf8),
+            keyData: Data(keyPayload.utf8),
+            now: fixedNow
+        )
+        #expect(zeroSnap.windows.count == 1)
+        #expect(zeroSnap.windows[0].usedPercent == 0.0)
+
+        let nilRemainingPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":5,"limit_reset":"daily","limit_remaining":null,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+        let nilRemainingSnap = try OpenRouterQuotaParser.parse(
+            creditsData: Data(creditsPayload.utf8),
+            keyData: Data(nilRemainingPayload.utf8),
+            now: fixedNow
+        )
+        #expect(nilRemainingSnap.windows.count == 2)
+        #expect(nilRemainingSnap.windows[1].label == "key limit (daily)")
+        #expect(nilRemainingSnap.windows[1].usedPercent == 0.0)
+
+        let missingDataCredits = """
+        {"other":123}
+        """
+        do {
+            _ = try OpenRouterQuotaParser.parse(
+                creditsData: Data(missingDataCredits.utf8),
+                keyData: Data(keyPayload.utf8),
+                now: fixedNow
+            )
+            #expect(Bool(false), "Expected badPayload error")
+        } catch let QuotaError.badPayload(msg) {
+            #expect(!msg.isEmpty)
+        } catch {
+            #expect(Bool(false), "Expected badPayload, got \(error)")
+        }
+    }
+
+    // 13. OpenRouterQuotaProvider
+    @Test("OpenRouterQuotaProvider: captured URLRequests and keyLoader error")
+    func openRouterQuotaProvider() async throws {
+        let captured = CapturedRequests()
+        let creditsPayload = """
+        {"data":{"total_credits":74,"total_usage":69.353701717}}
+        """
+        let keyPayload = """
+        {"data":{"label":"sk-or-v1-1f5...cac","limit":5,"limit_reset":"daily","limit_remaining":5,"usage":7.162991102,"usage_daily":0,"usage_weekly":0.007938767,"usage_monthly":0.05828838}}
+        """
+
+        let provider = OpenRouterQuotaProvider(
+            keyLoader: { "k" },
+            request: { req in
+                await captured.record(req)
+                if req.url?.path == "/api/v1/credits" {
+                    return Data(creditsPayload.utf8)
+                } else {
+                    return Data(keyPayload.utf8)
+                }
+            }
+        )
+
+        let snap = try await provider.fetch(now: fixedNow)
+        let requests = await captured.values
+        #expect(requests.count == 2)
+        #expect(requests[0].url?.absoluteString == "https://openrouter.ai/api/v1/credits")
+        #expect(requests[0].value(forHTTPHeaderField: "Authorization") == "Bearer k")
+        #expect(requests[1].url?.absoluteString == "https://openrouter.ai/api/v1/auth/key")
+        #expect(requests[1].value(forHTTPHeaderField: "Authorization") == "Bearer k")
+        #expect(snap.windows.count == 2)
+
+        enum TestError: Error { case failed }
+        let failingProvider = OpenRouterQuotaProvider(
+            keyLoader: { throw TestError.failed },
+            request: { _ in Data() }
+        )
+
+        do {
+            _ = try await failingProvider.fetch(now: fixedNow)
+            #expect(Bool(false), "Expected missingCredential error")
+        } catch let QuotaError.missingCredential(msg) {
+            #expect(!msg.isEmpty)
+        } catch {
+            #expect(Bool(false), "Expected missingCredential, got \(error)")
+        }
+    }
+
+    // 14. OpenRouterKey.load(environment:)
+    @Test("OpenRouterKey: load keychain priority, fallback to environment, or throws missingCredential")
+    func openRouterKeyLoad() throws {
+        let envVal = try OpenRouterKey.load(environment: ["OPENROUTER_API_KEY": "envk"], keychainReader: { nil })
+        #expect(envVal == "envk")
+
+        let kcVal = try OpenRouterKey.load(environment: ["OPENROUTER_API_KEY": "envk"], keychainReader: { "kc" })
+        #expect(kcVal == "kc")
+
+        do {
+            _ = try OpenRouterKey.load(environment: [:], keychainReader: { nil })
+            #expect(Bool(false), "Expected missingCredential error")
+        } catch let QuotaError.missingCredential(msg) {
+            #expect(msg == "set the OpenRouter key in settings")
+        } catch {
+            #expect(Bool(false), "Expected missingCredential, got \(error)")
+        }
+    }
 }
 
 private actor CapturedRequest {
     var value: URLRequest?
     func record(_ req: URLRequest) {
         value = req
+    }
+}
+
+private actor CapturedRequests {
+    var values: [URLRequest] = []
+    func record(_ req: URLRequest) {
+        values.append(req)
     }
 }

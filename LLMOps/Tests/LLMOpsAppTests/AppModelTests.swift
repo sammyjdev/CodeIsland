@@ -22,7 +22,7 @@ import LLMOpsCore
         defer { userDefaults.removePersistentDomain(forName: suite) }
 
         let model = AppModel(userDefaults: userDefaults)
-        #expect(model.quotaProviders().map(\.id) == [.claude, .codex, .antigravity, .zai])
+        #expect(model.quotaProviders().map(\.id) == [.claude, .codex, .antigravity, .zai, .openrouter])
     }
 
     @Test @MainActor func initialDefaults() {

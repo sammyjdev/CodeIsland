@@ -53,7 +53,8 @@ final class AppModel {
             ClaudeQuotaProvider(),
             CodexQuotaProvider(sessionsDirectory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")),
             AntigravityQuotaProvider(executablePath: settings.antigravityUsagePath),
-            ZaiQuotaProvider(keyLoader: { try ZaiKey.fromOpencodeAuth(path: zaiPath) })
+            ZaiQuotaProvider(keyLoader: { try ZaiKey.fromOpencodeAuth(path: zaiPath) }),
+            OpenRouterQuotaProvider()
         ]
     }
 
