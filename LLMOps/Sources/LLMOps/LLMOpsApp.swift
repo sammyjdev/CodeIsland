@@ -26,10 +26,14 @@ struct LLMOpsApp: App {
     // Not @State: SwiftUI macros (SwiftUIMacros) are missing from the
     // CommandLineTools toolchain. The App struct is created once, so a plain
     // stored @Observable reference is enough.
-    private let model = AppModel()
+    private let model: AppModel
+    private let notch: NotchPanelController
 
     init() {
         FontRegistrar.registerBundledFonts()
+        let model = AppModel()
+        self.model = model
+        self.notch = NotchPanelController(model: model)
     }
 
     var body: some Scene {
@@ -46,6 +50,7 @@ struct LLMOpsApp: App {
                 model.rescan()
                 model.startPeriodicRescan()
                 model.startServer()
+                notch.start()
                 model.sounds.playBoot()
             }
         }

@@ -287,5 +287,30 @@ import Testing
         #expect(reloaded.judgeBinaryPath == "/custom/bin/claude")
         #expect(reloaded.judgeModel == "opus")
     }
+
+    // Required N1: requestPresentationDefaultsAndPersistence
+    @Test @MainActor func requestPresentationDefaultsAndPersistence() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // Fresh defaults: requestPresentation == .notch
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.requestPresentation == .notch)
+
+        // legacy bringToFrontOnRequest = false stored with no new key gives .none
+        let legacySuite = "test-legacy-\(UUID().uuidString)"
+        let legacyDefaults = try #require(UserDefaults(suiteName: legacySuite))
+        defer { legacyDefaults.removePersistentDomain(forName: legacySuite) }
+        legacyDefaults.set(false, forKey: LLMOpsSettings.Key.bringToFrontOnRequest)
+
+        let legacySettings = LLMOpsSettings(userDefaults: legacyDefaults)
+        #expect(legacySettings.requestPresentation == .none)
+
+        // setting .front persists across instances
+        settings.requestPresentation = .front
+        let reloaded = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded.requestPresentation == .front)
+    }
 }
 

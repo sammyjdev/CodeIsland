@@ -69,13 +69,19 @@ final class AppModel {
             self?.rescan()
         }
         live.onPendingAdded = { [weak self] _ in
-            self?.bringToFrontIfEnabled()
+            self?.presentRequest()
+        }
+    }
+
+    func presentRequest() {
+        switch settings.requestPresentation {
+        case .front: activator()
+        case .notch, .none: break // the notch controller reacts to live.pending by itself
         }
     }
 
     func bringToFrontIfEnabled() {
-        guard settings.bringToFrontOnRequest else { return }
-        activator()
+        presentRequest()
     }
 
     // No deinit: AppModel lives for the whole app lifetime, and a nonisolated

@@ -308,25 +308,4 @@ final class FakeClock: LiveClock, @unchecked Sendable {
         #expect(resultWithEnded.visible.contains { $0.id == "s4" })
         #expect(resultWithEnded.hiddenIdle == 1)
     }
-
-    // Required F7.3: bringToFrontOnlyWhenEnabled
-    @Test @MainActor func bringToFrontOnlyWhenEnabled() throws {
-        let suite = "test-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let model = AppModel(userDefaults: defaults)
-        var count = 0
-        model.activator = { count += 1 }
-
-        let reqJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}"#.utf8)
-        let event = try #require(HookEvent(from: reqJSON))
-
-        model.live.permissionRequested(event: event, cwd: nil) { _ in }
-        #expect(count == 1)
-
-        model.settings.bringToFrontOnRequest = false
-        model.live.permissionRequested(event: event, cwd: nil) { _ in }
-        #expect(count == 1)
-    }
 }

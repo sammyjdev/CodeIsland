@@ -215,4 +215,31 @@ import LLMOpsCore
         #expect(model.profileSessions == [s1, s2])
         #endif
     }
+
+    // Required N1: presentRequestActivatesOnlyOnFront
+    @Test @MainActor func presentRequestActivatesOnlyOnFront() throws {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: userDefaults)
+        defer { model.stopPeriodicRescan() }
+        var count = 0
+        model.activator = { count += 1 }
+
+        model.settings.requestPresentation = .front
+        model.presentRequest()
+        #expect(count == 1)
+
+        model.settings.requestPresentation = .notch
+        model.presentRequest()
+        #expect(count == 1)
+
+        model.settings.requestPresentation = .none
+        model.presentRequest()
+        #expect(count == 1)
+    }
 }

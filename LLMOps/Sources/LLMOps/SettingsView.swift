@@ -462,14 +462,24 @@ struct SettingsView: View {
                     }
                 }
 
-                Toggle("bring to front on permission request", isOn: Binding(
-                    get: { model.settings.bringToFrontOnRequest },
-                    set: { model.settings.bringToFrontOnRequest = $0 }
-                ))
-                .font(Theme.Fonts.body(12))
-                .foregroundStyle(Theme.Colors.text)
-                .toggleStyle(.switch)
-                .tint(Theme.Colors.magenta)
+                HStack(spacing: 12) {
+                    Text("on request")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    Picker("on request", selection: Binding(
+                        get: { model.settings.requestPresentation },
+                        set: { model.settings.requestPresentation = $0 }
+                    )) {
+                        Text("notch popup").tag(LLMOpsSettings.RequestPresentation.notch)
+                        Text("bring app to front").tag(LLMOpsSettings.RequestPresentation.front)
+                        Text("nothing").tag(LLMOpsSettings.RequestPresentation.none)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -20,9 +20,12 @@ public final class LLMOpsSettings {
         public static let hideIdleAfterSeconds = "llmops.live.hideIdleAfterSeconds"   // default 300
         public static let soundVolume = "llmops.sound.volume"                         // default 60
         public static let bringToFrontOnRequest = "llmops.live.bringToFrontOnRequest" // default true
+        public static let requestPresentation = "llmops.live.requestPresentation"
         public static let judgeBinaryPath = "llmops.judge.binaryPath"   // default: NSHomeDirectory() + "/.local/bin/claude"
         public static let judgeModel = "llmops.judge.model"             // default: "sonnet"
     }
+
+    public enum RequestPresentation: String, CaseIterable, Sendable { case notch, front, none }
 
     public var judgeBinaryPath: String {
         get {
@@ -74,6 +77,25 @@ public final class LLMOpsSettings {
             let clamped = min(100, max(0, newValue))
             withMutation(keyPath: \.soundVolume) {
                 defaults.set(clamped, forKey: Key.soundVolume)
+            }
+        }
+    }
+
+    public var requestPresentation: RequestPresentation {
+        get {
+            access(keyPath: \.requestPresentation)
+            if let raw = defaults.string(forKey: Key.requestPresentation),
+               let presentation = RequestPresentation(rawValue: raw) {
+                return presentation
+            }
+            if let legacy = defaults.object(forKey: Key.bringToFrontOnRequest) as? Bool, !legacy {
+                return .none
+            }
+            return .notch
+        }
+        set {
+            withMutation(keyPath: \.requestPresentation) {
+                defaults.set(newValue.rawValue, forKey: Key.requestPresentation)
             }
         }
     }
