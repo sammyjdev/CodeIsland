@@ -15,6 +15,8 @@ struct RouteView: View {
             AnalysisView(model: model)
         case .system:
             SystemView(model: model)
+        case .quotas:
+            QuotasView(model: model)
         case .settings:
             SettingsView(model: model)
         }
@@ -51,6 +53,7 @@ struct LLMOpsApp: App {
                 model.startPeriodicRescan()
                 model.startServer()
                 notch.start()
+                model.quotas.start(providers: model.quotaProviders())
                 model.sounds.playBoot()
             }
         }

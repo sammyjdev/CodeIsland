@@ -6,11 +6,23 @@ import LLMOpsCore
 
 @Suite struct AppModelTests {
     @Test func routeCases() {
-        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "system", "settings"])
+        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "system", "quotas", "settings"])
     }
 
     @Test func analysisRoute() {
-        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "system", "settings"])
+        #expect(Route.allCases.map(\.rawValue) == ["live", "history", "analytics", "analysis", "system", "quotas", "settings"])
+    }
+
+    @Test @MainActor func quotaProvidersList() {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: userDefaults)
+        #expect(model.quotaProviders().map(\.id) == [.claude, .codex, .antigravity, .zai])
     }
 
     @Test @MainActor func initialDefaults() {

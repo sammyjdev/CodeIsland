@@ -312,5 +312,33 @@ import Testing
         let reloaded = LLMOpsSettings(userDefaults: defaults)
         #expect(reloaded.requestPresentation == .front)
     }
-}
 
+    // Required Q2: quotaSettingsDefaultsPersistenceAndBlankValues
+    @Test @MainActor func quotaSettingsDefaultsPersistenceAndBlankValues() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.zaiAuthPath.hasSuffix("/.local/share/opencode/auth.json"))
+        #expect(!settings.antigravityUsagePath.isEmpty)
+
+        settings.antigravityUsagePath = "/custom/bin/antigravity-usage"
+        settings.zaiAuthPath = "/custom/share/auth.json"
+
+        let reloaded = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded.antigravityUsagePath == "/custom/bin/antigravity-usage")
+        #expect(reloaded.zaiAuthPath == "/custom/share/auth.json")
+
+        // Setting "" or "   " leaves the previous value
+        reloaded.antigravityUsagePath = ""
+        reloaded.zaiAuthPath = "   "
+        #expect(reloaded.antigravityUsagePath == "/custom/bin/antigravity-usage")
+        #expect(reloaded.zaiAuthPath == "/custom/share/auth.json")
+
+        reloaded.antigravityUsagePath = "   "
+        reloaded.zaiAuthPath = ""
+        #expect(reloaded.antigravityUsagePath == "/custom/bin/antigravity-usage")
+        #expect(reloaded.zaiAuthPath == "/custom/share/auth.json")
+    }
+}

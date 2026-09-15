@@ -10,6 +10,7 @@ enum Route: String, CaseIterable, Identifiable {
     case analytics
     case analysis
     case system
+    case quotas
     case settings
 
     var id: String { rawValue }
@@ -27,6 +28,7 @@ final class AppModel {
     var selectedProfile: String?
     var route: Route = .live
     let live: LiveStore
+    let quotas = QuotaState()
     private(set) var sessions: [Session] = []
     private(set) var lastScanAt: Date?
     private var scanCache = TranscriptScanner.ScanCache()
@@ -44,6 +46,16 @@ final class AppModel {
     let sounds: SoundManager
     private(set) var server: HookServer?
     var isServerListening: Bool { server?.isListening ?? false }
+
+    func quotaProviders() -> [any QuotaProvider] {
+        let zaiPath = settings.zaiAuthPath
+        return [
+            ClaudeQuotaProvider(),
+            CodexQuotaProvider(sessionsDirectory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")),
+            AntigravityQuotaProvider(executablePath: settings.antigravityUsagePath),
+            ZaiQuotaProvider(keyLoader: { try ZaiKey.fromOpencodeAuth(path: zaiPath) })
+        ]
+    }
 
     init(
         userDefaults: UserDefaults = .standard,

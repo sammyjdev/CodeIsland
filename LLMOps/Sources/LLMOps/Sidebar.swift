@@ -1,9 +1,35 @@
 import SwiftUI
+import LLMOpsCore
 
 struct Sidebar: View {
     // Plain reference, not @Bindable: SwiftUI macros are unavailable on a
     // CommandLineTools-only toolchain. @Observable still tracks reads.
     var model: AppModel
+    @ObservedObject private var quotas: QuotaState
+
+    init(model: AppModel) {
+        self.model = model
+        _quotas = ObservedObject(wrappedValue: model.quotas)
+    }
+
+    private var quotaLine: String {
+        QuotaProviderID.allCases.map { id in
+            let label: String
+            switch id {
+            case .claude: label = "claude"
+            case .codex: label = "codex"
+            case .antigravity: label = "agy"
+            case .zai: label = "zai"
+            }
+            let valueText: String
+            if let pct = quotas.sidebarPercent(for: id) {
+                valueText = "\(Int(pct.rounded()))"
+            } else {
+                valueText = "--"
+            }
+            return "\(label) \(valueText)"
+        }.joined(separator: "  ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -63,6 +89,11 @@ struct Sidebar: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            Text(quotaLine)
+                .font(Theme.Fonts.mono(10))
+                .foregroundStyle(Theme.Colors.textDim)
+                .padding(.horizontal, 16)
 
             Spacer()
         }

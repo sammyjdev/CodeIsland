@@ -23,6 +23,58 @@ public final class LLMOpsSettings {
         public static let requestPresentation = "llmops.live.requestPresentation"
         public static let judgeBinaryPath = "llmops.judge.binaryPath"   // default: NSHomeDirectory() + "/.local/bin/claude"
         public static let judgeModel = "llmops.judge.model"             // default: "sonnet"
+        public static let antigravityUsagePath = "llmops.quotas.antigravityUsagePath"
+        public static let zaiAuthPath = "llmops.quotas.zaiAuthPath"
+    }
+
+    /// Newest (by version string, descending) NSHomeDirectory()/.nvm/versions/node/*/bin/antigravity-usage that exists,
+    /// else "/usr/local/bin/antigravity-usage".
+    public nonisolated static func defaultAntigravityUsagePath(
+        home: String = NSHomeDirectory(),
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> String {
+        let nodeDir = (home as NSString).appendingPathComponent(".nvm/versions/node")
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: nodeDir) {
+            let sortedVersions = contents.sorted { v1, v2 in
+                v1.compare(v2, options: .numeric) == .orderedDescending
+            }
+            for version in sortedVersions {
+                let candidate = ((nodeDir as NSString).appendingPathComponent(version) as NSString)
+                    .appendingPathComponent("bin/antigravity-usage")
+                if fileExists(candidate) {
+                    return candidate
+                }
+            }
+        }
+        return "/usr/local/bin/antigravity-usage"
+    }
+
+    public var antigravityUsagePath: String {
+        get {
+            access(keyPath: \.antigravityUsagePath)
+            return defaults.string(forKey: Key.antigravityUsagePath) ?? Self.defaultAntigravityUsagePath()
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            withMutation(keyPath: \.antigravityUsagePath) {
+                defaults.set(newValue, forKey: Key.antigravityUsagePath)
+            }
+        }
+    }
+
+    public var zaiAuthPath: String {
+        get {
+            access(keyPath: \.zaiAuthPath)
+            return defaults.string(forKey: Key.zaiAuthPath) ?? (NSHomeDirectory() + "/.local/share/opencode/auth.json")
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            withMutation(keyPath: \.zaiAuthPath) {
+                defaults.set(newValue, forKey: Key.zaiAuthPath)
+            }
+        }
     }
 
     public enum RequestPresentation: String, CaseIterable, Sendable { case notch, front, none }

@@ -24,6 +24,7 @@ struct SettingsView: View {
                 soundsCard
                 liveCard
                 judgeCard
+                quotasCard
                 hookServerCard
             }
             .padding(24)
@@ -543,6 +544,71 @@ struct SettingsView: View {
                 }
 
                 Text("runs with -p --no-session-persistence, nothing is written to ~/.claude")
+                    .font(Theme.Fonts.mono(11))
+                    .foregroundStyle(Theme.Colors.textDim)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Quotas Card
+
+    private var quotasCard: some View {
+        EvidenceCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Eyebrow("quotas")
+
+                HStack(spacing: 12) {
+                    Text("antigravity-usage")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    TextField("", text: Binding(
+                        get: { model.settings.antigravityUsagePath },
+                        set: { model.settings.antigravityUsagePath = $0 }
+                    ))
+                    .font(Theme.Fonts.mono(12))
+                    .foregroundStyle(Theme.Colors.text)
+                    .textFieldStyle(.plain)
+                    .frame(width: 260)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(Theme.Colors.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                            .stroke(Theme.Colors.line, lineWidth: 1)
+                    )
+                }
+
+                HStack(spacing: 12) {
+                    Text("opencode auth.json")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    TextField("", text: Binding(
+                        get: { model.settings.zaiAuthPath },
+                        set: { model.settings.zaiAuthPath = $0 }
+                    ))
+                    .font(Theme.Fonts.mono(12))
+                    .foregroundStyle(Theme.Colors.text)
+                    .textFieldStyle(.plain)
+                    .frame(width: 260)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(Theme.Colors.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                            .stroke(Theme.Colors.line, lineWidth: 1)
+                    )
+                }
+
+                Text("claude token from the keychain, codex from ~/.codex/sessions")
                     .font(Theme.Fonts.mono(11))
                     .foregroundStyle(Theme.Colors.textDim)
             }
