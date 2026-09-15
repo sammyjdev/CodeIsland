@@ -481,6 +481,48 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                 }
+
+                HStack(spacing: 12) {
+                    Text("island")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    Picker("island", selection: Binding(
+                        get: { model.settings.islandVisibility },
+                        set: { model.settings.islandVisibility = $0 }
+                    )) {
+                        Text("while sessions are live").tag(IslandVisibility.whileLive)
+                        Text("only when pending").tag(IslandVisibility.onlyPending)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                HStack(spacing: 12) {
+                    Text("mascot speed")
+                        .font(Theme.Fonts.body(12))
+                        .foregroundStyle(Theme.Colors.text)
+
+                    Spacer()
+
+                    Slider(
+                        value: Binding(
+                            get: { Double(model.settings.mascotSpeed) },
+                            set: { model.settings.mascotSpeed = Int($0) }
+                        ),
+                        in: 25...300,
+                        step: 25
+                    )
+                    .tint(Theme.Colors.magenta)
+                    .frame(width: 140)
+
+                    Text("\(model.settings.mascotSpeed)%")
+                        .font(Theme.Fonts.mono(12))
+                        .foregroundStyle(Theme.Colors.text)
+                        .frame(width: 44, alignment: .trailing)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

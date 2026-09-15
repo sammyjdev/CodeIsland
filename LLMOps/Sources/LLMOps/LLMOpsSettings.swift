@@ -25,6 +25,8 @@ public final class LLMOpsSettings {
         public static let judgeModel = "llmops.judge.model"             // default: "sonnet"
         public static let antigravityUsagePath = "llmops.quotas.antigravityUsagePath"
         public static let zaiAuthPath = "llmops.quotas.zaiAuthPath"
+        public static let islandVisibility = "llmops.island.visibility"
+        public static let mascotSpeed = "llmops.island.mascotSpeed"
     }
 
     /// Newest (by version string, descending) NSHomeDirectory()/.nvm/versions/node/*/bin/antigravity-usage that exists,
@@ -173,6 +175,35 @@ public final class LLMOpsSettings {
             let clamped = min(600, max(0, newValue))
             withMutation(keyPath: \.endedRetentionSeconds) {
                 defaults.set(clamped, forKey: Key.endedRetentionSeconds)
+            }
+        }
+    }
+
+    public var islandVisibility: IslandVisibility {
+        get {
+            access(keyPath: \.islandVisibility)
+            if let raw = defaults.string(forKey: Key.islandVisibility),
+               let visibility = IslandVisibility(rawValue: raw) {
+                return visibility
+            }
+            return .whileLive
+        }
+        set {
+            withMutation(keyPath: \.islandVisibility) {
+                defaults.set(newValue.rawValue, forKey: Key.islandVisibility)
+            }
+        }
+    }
+
+    public var mascotSpeed: Int {
+        get {
+            access(keyPath: \.mascotSpeed)
+            return defaults.object(forKey: Key.mascotSpeed) as? Int ?? 100
+        }
+        set {
+            let clamped = min(300, max(25, newValue))
+            withMutation(keyPath: \.mascotSpeed) {
+                defaults.set(clamped, forKey: Key.mascotSpeed)
             }
         }
     }

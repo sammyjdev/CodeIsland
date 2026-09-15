@@ -341,4 +341,29 @@ import Testing
         #expect(reloaded.antigravityUsagePath == "/custom/bin/antigravity-usage")
         #expect(reloaded.zaiAuthPath == "/custom/share/auth.json")
     }
+
+    // 7. islandVisibility defaults to .whileLive and persists;
+    // mascotSpeed defaults to 100, clamps 10 -> 25 and 999 -> 300, persists.
+    @Test @MainActor func islandVisibilityAndMascotSpeedSettings() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = LLMOpsSettings(userDefaults: defaults)
+        #expect(settings.islandVisibility == .whileLive)
+        #expect(settings.mascotSpeed == 100)
+
+        settings.mascotSpeed = 10
+        #expect(settings.mascotSpeed == 25)
+
+        settings.mascotSpeed = 999
+        #expect(settings.mascotSpeed == 300)
+
+        settings.mascotSpeed = 150
+        settings.islandVisibility = .onlyPending
+
+        let reloaded = LLMOpsSettings(userDefaults: defaults)
+        #expect(reloaded.islandVisibility == .onlyPending)
+        #expect(reloaded.mascotSpeed == 150)
+    }
 }

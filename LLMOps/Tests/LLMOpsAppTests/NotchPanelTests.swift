@@ -31,6 +31,9 @@ struct NotchPanelTests {
 
         let model = AppModel(userDefaults: userDefaults)
         defer { model.stopPeriodicRescan() }
+        // The default whileLive keeps the island up while the session lives;
+        // this test is about pending items, so pin the pending-only mode.
+        model.settings.islandVisibility = .onlyPending
 
         let controller = NotchPanelController(model: model)
         controller.start()
@@ -102,5 +105,77 @@ struct NotchPanelTests {
         let panel = try #require(controller.panel)
         #expect(panel.styleMask.contains(.nonactivatingPanel))
         #expect(panel.level.rawValue == Int(CGWindowLevelForKey(.mainMenuWindow)) + 2)
+    }
+
+    // 5. With islandVisibility = .whileLive and one live session, panel is visible;
+    // after SessionEnd and retention purge it hides.
+    @Test func visibilityWhileLiveShowsWithSessionAndHidesAfterPurge() async throws {
+        let suite = "NotchPanelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: userDefaults)
+        defer { model.stopPeriodicRescan() }
+        #expect(model.settings.islandVisibility == .whileLive)
+
+        let controller = NotchPanelController(model: model)
+        controller.start()
+        #expect(controller.isShowing == false)
+
+        model.live.endedRetention = 0
+
+        let startJSON = Data(#"{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/tmp/testProj"}"#.utf8)
+        let startEvent = try #require(HookEvent(from: startJSON))
+        model.live.handle(event: startEvent, cwd: "/tmp/testProj")
+
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(controller.isShowing == true)
+
+        let endJSON = Data(#"{"hook_event_name":"SessionEnd","session_id":"s1"}"#.utf8)
+        let endEvent = try #require(HookEvent(from: endJSON))
+        model.live.handle(event: endEvent, cwd: nil)
+
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(controller.isShowing == false)
+    }
+
+    // 6. With islandVisibility = .onlyPending, a live session alone keeps panel hidden;
+    // a pending permission shows it.
+    @Test func visibilityOnlyPendingKeepsLiveSessionHiddenUntilPending() async throws {
+        let suite = "NotchPanelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(userDefaults: userDefaults)
+        defer { model.stopPeriodicRescan() }
+        model.settings.islandVisibility = .onlyPending
+
+        let controller = NotchPanelController(model: model)
+        controller.start()
+        #expect(controller.isShowing == false)
+
+        let startJSON = Data(#"{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/tmp/testProj"}"#.utf8)
+        let startEvent = try #require(HookEvent(from: startJSON))
+        model.live.handle(event: startEvent, cwd: "/tmp/testProj")
+
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(controller.isShowing == false)
+
+        let reqJSON = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash"}"#.utf8)
+        let reqEvent = try #require(HookEvent(from: reqJSON))
+        model.live.permissionRequested(event: reqEvent, cwd: nil) { _ in }
+
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(controller.isShowing == true)
     }
 }
