@@ -9,6 +9,10 @@ import PackageDescription
 let package = Package(
     name: "LLMOps",
     platforms: [.macOS(.v14)],
+    products: [
+        .executable(name: "LLMOps", targets: ["LLMOps"]),
+        .executable(name: "LLMOpsWidgets", targets: ["LLMOpsWidgets"]),
+    ],
     dependencies: [
         .package(name: "CodeIsland", path: ".."),
     ],
@@ -30,6 +34,17 @@ let package = Package(
                 .copy("Resources")
             ]
         ),
+        .executableTarget(
+            name: "LLMOpsWidgets",
+            dependencies: ["LLMOpsCore"],
+            path: "Sources/LLMOpsWidgets",
+            swiftSettings: [.unsafeFlags(["-application-extension"])],
+            linkerSettings: [
+                .linkedFramework("WidgetKit"),
+                .linkedFramework("SwiftUI"),
+                .unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain"]),
+            ]
+        ),
         .testTarget(
             name: "LLMOpsCoreTests",
             dependencies: ["LLMOpsCore"]
@@ -40,3 +55,4 @@ let package = Package(
         ),
     ]
 )
+
