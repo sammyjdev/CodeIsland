@@ -369,3 +369,48 @@ Spike (2026-09-15 and 16), all without Xcode, CommandLineTools only:
 
 ### Out of scope
 Interactive widgets, configurable intents, lock screen, Team ID signing, App Group.
+
+## S9. Widgets v2: quotas per subscription, LLMOps identity (approved 2026-09-16)
+
+Owner feedback on S8: the quotas widget must group by subscription (provider) and all three widgets
+must look like LLMOps, not like a debug print. Design authority: `~/.claude/design-stack/impeccable.md`
+(tinted neutrals, one locked accent, calm finish). The widgets mirror the app's `Theme` by hex because
+the appex cannot import the app target.
+
+### Shared chrome (`WidgetChrome`)
+- Background `#0B0A0E` via `containerBackground(for: .widget)`; an inner 1 pt hairline `#2C2738`
+  rounded 10 around the content, padding 10.
+- Eyebrow top-left: widget name in mono 9, uppercase, tracking 1.2, `#9B93AD`.
+- Footer bottom-right: `writtenAt` as `HH:mm` mono 9, `#857F99`.
+- Text `#ECE8F2`, dim `#9B93AD`, muted `#857F99`, accent `#9D7AE8`, accent bright `#DDA8FF`,
+  cyan `#4EC9E8`, track `#2C2738`. Monospaced system font everywhere. No gradient, no shadow, no
+  blur, no emoji, plain hyphen only.
+- Bars: `Capsule` track `#2C2738` height 4, fill `#9D7AE8` below 80 percent and `#DDA8FF` at or above.
+- Empty state: eyebrow plus `no data` in dim and `open LLMOps` in muted, nothing else.
+
+### Quotas
+- Grouped by provider in `QuotaProviderID.allCases` order; providers without quotas are hidden.
+- Small: one row per provider (max 5): provider name mono 10 `#DDA8FF` left, bar in the middle,
+  worst `NN%` mono 10 right. Provider names: `claude`, `codex`, `agy`, `z.ai`, `openrouter`.
+- Medium: two columns of provider blocks; each block: provider name, then one line per window with
+  `label` (5h, 7d, credits...) dim, a bar, `NN%`, and `resets 2h 10m` muted when `resetsAt` is in the
+  future (`WidgetFormat.resetsIn`), max 3 windows per provider.
+
+### Today
+- Small: eyebrow `today`; hero number = cost as `$12.34` mono 24 `#ECE8F2`; below, `N sessions`
+  and `N tokens` (grouped) dim mono 10 on one line each.
+- Medium: three stat tiles side by side (`cost`, `sessions`, `tokens`), each eyebrow-style label
+  above a mono 20 value; a hairline separates tiles.
+
+### System
+- Small: three rows `cpu`, `mem`, `bat`, each with the label dim, a bar and the value; cpu bar is
+  cyan, mem accent, bat accent bright; `bat -` and an empty track when nil.
+- Medium: same rows with more width, plus the value in mono 14 on the right.
+
+### Core helpers (testable, `WidgetFormat`)
+- `resetsIn(_ date: Date?, now: Date) -> String?`: nil when date is nil or not after now; `"2h 10m"`,
+  `"45m"`, `"3d 4h"` otherwise.
+- `grouped(_ quotas: [WidgetQuota]) -> [(provider: QuotaProviderID, quotas: [WidgetQuota])]` in
+  allCases order, empty providers dropped.
+- `worstPercent(_ quotas: [WidgetQuota]) -> Double` = max usedPercent, 0 for empty.
+- `providerName(_ id: QuotaProviderID) -> String` mapping antigravity to `agy`, others rawValue.
