@@ -13,6 +13,7 @@ final class SystemState: ObservableObject {
     static let historyLength = 30
     static let top = 10
 
+    var onSample: ((SystemSample) -> Void)? = nil
     private(set) var previous: RawReading?
     private var timer: Timer?
 
@@ -52,6 +53,8 @@ final class SystemState: ObservableObject {
         if memoryHistory.count > Self.historyLength {
             memoryHistory.removeFirst(memoryHistory.count - Self.historyLength)
         }
+
+        onSample?(sample)
     }
 }
 
@@ -88,6 +91,7 @@ struct SystemView: View {
         }
         .background(Theme.Colors.bg)
         .onAppear {
+            state.onSample = { model.recordSystemSample($0) }
             state.start(probe: MachProbe())
         }
         .onDisappear {

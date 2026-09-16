@@ -254,4 +254,91 @@ import LLMOpsCore
         model.presentRequest()
         #expect(count == 1)
     }
+
+    @Test @MainActor func widgetSnapshotWrittenOnExplicitCall() throws {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = WidgetSnapshotStore(directory: tempDir)
+        let model = AppModel(userDefaults: userDefaults, widgetStore: store)
+        defer { model.stopPeriodicRescan() }
+
+        let now = Date()
+        var usage = ClaudeUsageTotals()
+        usage.inputTokens = 50
+        usage.outputTokens = 20
+        let turn = Turn(id: "t1", startedAt: now, model: "claude-sonnet-5", usage: usage)
+        let session = Session(
+            id: "s1",
+            profile: "p1",
+            filePath: "/tmp/s1.jsonl",
+            startedAt: now,
+            lastActivity: now,
+            turns: [turn],
+            usage: usage
+        )
+        model.setSessionsForTesting([session])
+
+        model.writeWidgetSnapshot(now: now)
+
+        let readSnapshot = store.read()
+        #expect(readSnapshot != nil)
+        #expect(readSnapshot?.today.sessions == 1)
+        if let writtenAt = readSnapshot?.writtenAt {
+            #expect(abs(writtenAt.timeIntervalSince(now)) < 1.0)
+        }
+    }
+
+    @Test @MainActor func recordSystemSampleWritesSnapshot() throws {
+        let suite = "AppModelTests-" + UUID().uuidString
+        guard let userDefaults = UserDefaults(suiteName: suite) else {
+            Issue.record("Failed to create UserDefaults suite")
+            return
+        }
+        defer { userDefaults.removePersistentDomain(forName: suite) }
+
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = WidgetSnapshotStore(directory: tempDir)
+        let model = AppModel(userDefaults: userDefaults, widgetStore: store)
+        defer { model.stopPeriodicRescan() }
+
+        let sample = SystemSample(
+            at: Date(),
+            cpuPercent: 77.5,
+            memory: MemorySample(total: 1000, used: 500, wired: 100, compressed: 100, free: 500),
+            topByCPU: [],
+            topByMemory: [],
+            battery: nil
+        )
+
+        let t0 = Date()
+        model.recordSystemSample(sample, now: t0)
+
+        let readSnapshot = store.read()
+        #expect(readSnapshot != nil)
+        #expect(readSnapshot?.system.cpuPercent == 77.5)
+
+        // Throttled: a second sample within 30 s does not rewrite; after 30 s it does.
+        let later = SystemSample(
+            at: Date(),
+            cpuPercent: 12.0,
+            memory: sample.memory,
+            topByCPU: [],
+            topByMemory: [],
+            battery: nil
+        )
+        model.recordSystemSample(later, now: t0.addingTimeInterval(5))
+        #expect(store.read()?.system.cpuPercent == 77.5)
+        model.recordSystemSample(later, now: t0.addingTimeInterval(31))
+        #expect(store.read()?.system.cpuPercent == 12.0)
+    }
 }

@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 import Observation
+import Combine
+import WidgetKit
 import CodeIslandCore
 import LLMOpsCore
 
@@ -32,6 +34,17 @@ final class AppModel {
     private(set) var sessions: [Session] = []
     private(set) var lastScanAt: Date?
     private var scanCache = TranscriptScanner.ScanCache()
+
+    let widgetStore: WidgetSnapshotStore
+    private(set) var lastSystemSummary: SystemSummary?
+    private var cancellables = Set<AnyCancellable>()
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+            || ProcessInfo.processInfo.processName.hasSuffix("xctest")
+            || ProcessInfo.processInfo.processName == "swiftpm-testing-helper"
+    }
 
     private var periodicTimer: Timer?
     private var currentScanTask: Task<Void, Never>?
@@ -69,7 +82,8 @@ final class AppModel {
 
     init(
         userDefaults: UserDefaults = .standard,
-        scanner: @escaping @Sendable ([Profile], inout TranscriptScanner.ScanCache) -> [Session] = { TranscriptScanner.scan(profiles: $0, cache: &$1) }
+        scanner: @escaping @Sendable ([Profile], inout TranscriptScanner.ScanCache) -> [Session] = { TranscriptScanner.scan(profiles: $0, cache: &$1) },
+        widgetStore: WidgetSnapshotStore = WidgetSnapshotStore()
     ) {
         let store = ProfileStore(userDefaults: userDefaults)
         let loaded = store.load()
@@ -80,6 +94,7 @@ final class AppModel {
         self.settings = settings
         self.sounds = sounds
         self.scanner = scanner
+        self.widgetStore = widgetStore
         let liveStore = LiveStore(profiles: loaded, endedRetention: TimeInterval(settings.endedRetentionSeconds))
         liveStore.onSound = { [sounds] name in
             sounds.handleEvent(name)
@@ -93,6 +108,40 @@ final class AppModel {
         live.onPendingAdded = { [weak self] _ in
             self?.presentRequest()
         }
+        // Debounced: a refresh assigns results once per provider; WidgetKit budgets reloads.
+        quotas.$results
+            .dropFirst()
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.writeWidgetSnapshot()
+            }
+            .store(in: &cancellables)
+    }
+
+    func writeWidgetSnapshot(now: Date = Date()) {
+        if Self.isRunningTests && widgetStore.directory == WidgetSnapshotStore.defaultDirectory() {
+            return
+        }
+        let snapshot = WidgetSnapshot(
+            writtenAt: now,
+            quotas: WidgetSnapshotBuilder.quotas(from: quotas.results),
+            today: WidgetSnapshotBuilder.today(sessions, now: now, calendar: .current),
+            system: lastSystemSummary ?? SystemSummary(cpuPercent: 0, memoryUsedPercent: 0, batteryPercent: nil)
+        )
+        try? widgetStore.write(snapshot)
+        if !Self.isRunningTests {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
+    private var lastSystemWriteAt: Date = .distantPast
+
+    /// The system tab ticks every 2 s; the widget only needs a write every 30 s.
+    func recordSystemSample(_ sample: SystemSample, now: Date = Date()) {
+        lastSystemSummary = WidgetSnapshotBuilder.system(sample)
+        guard now.timeIntervalSince(lastSystemWriteAt) >= 30 else { return }
+        lastSystemWriteAt = now
+        writeWidgetSnapshot(now: now)
     }
 
     func presentRequest() {
@@ -128,6 +177,7 @@ final class AppModel {
             self.sessions = scannedSessions
             self.scanCache = updatedCache
             self.lastScanAt = Date()
+            self.writeWidgetSnapshot()
         }
     }
 
