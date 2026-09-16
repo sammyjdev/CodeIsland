@@ -325,3 +325,47 @@ Owner request: stop activating the app on requests; show a popup at the notch, l
 
 Out of scope: notch for metrics or sounds, per provider multiple accounts, quota alerts.
 - S6 landed as 90cd1be (providers) and the quotas screen commit; S7 as 6f7d398. 202 tests in 20 suites. Sound report root cause (bf4c004): the test bundle played the real wavs through SoundManager fixtures; the app never played while disabled.
+
+## S8. WidgetKit widgets: quotas, today, system (approved 2026-09-16)
+
+Spike (2026-09-15 and 16), all without Xcode, CommandLineTools only:
+- The appex builds with `swiftc -parse-as-library -application-extension -framework WidgetKit
+  -framework SwiftUI -Xlinker -e -Xlinker _NSExtensionMain`. Without the `_NSExtensionMain` entry
+  point the process exits 0 right after launch and chronod never gets widget descriptors (the widget
+  gallery then lists the app with no widgets). Bundle laid out by hand, `NSExtensionPointIdentifier`
+  `com.apple.widgetkit-extension`, ad-hoc `codesign`, appex entitlement `com.apple.security.app-sandbox`.
+- Descriptors are fetched only when the widget gallery opens ("host requested: NotificationCenter");
+  chronod restarts do not fetch them for non-Apple extensions. Bump `CFBundleVersion` on every build so
+  the gallery refetches.
+- Data path: with an ad-hoc signature (no Team ID) the sandboxed appex resolves the App Group container
+  but the read is denied. It does read its own container, so the app (not sandboxed) writes
+  `~/Library/Containers/<appex bundle id>/Data/Library/Application Support/snapshot.json` and the
+  widget reads `FileManager.urls(for: .applicationSupportDirectory)` from inside the sandbox. No App
+  Group entitlement anywhere.
+
+### Contract
+- LLMOpsCore: `WidgetSnapshot: Codable, Equatable` with `writtenAt: Date`, `quotas: [QuotaWindow]`
+  keyed per provider (`provider: QuotaProviderID, label, usedPercent, resetsAt`), `today: TodaySummary`
+  (`sessions: Int, tokens: Int, costUSD: Double`), `system: SystemSummary` (`cpuPercent, memoryUsedPercent,
+  batteryPercent: Double?`). `WidgetSnapshotStore(directory: URL)`: `write(_:)` atomic, `read()` nil on
+  missing or undecodable. Default directory is the appex container path above for bundle id
+  `dev.samdev.llmops.widgets`.
+- App: writes after every quota refresh, every LiveStore tick that changes today totals and every
+  SystemSampler tick, then `WidgetCenter.shared.reloadAllTimelines()`.
+- Appex target `LLMOpsWidgets` (executable product): three `StaticConfiguration` widgets, kinds
+  `quotas`, `today`, `system`, families systemSmall and systemMedium, timeline policy
+  `.after(now + 15 min)` as fallback, mono font, Theme tokens, no `.shadow`, no `.blur`, plain hyphen.
+  Missing snapshot renders `no data, open LLMOps`.
+- build.sh: compile the appex with the flags above, lay out `Contents/PlugIns/LLMOpsWidgets.appex`
+  with its Info.plist (bundle id `dev.samdev.llmops.widgets`, `CFBundleVersion` = build timestamp),
+  sign appex with the sandbox entitlement, then the app.
+
+### Tasks (agy, one clone per task)
+- W1: `WidgetSnapshot`, `TodaySummary`, `SystemSummary`, `WidgetSnapshotStore` + tests (core only).
+- W2: app plumbing: snapshot builders from existing models, writers on the three triggers,
+  `reloadAllTimelines`, AppModel tests with a fake store directory.
+- W3: appex target with the three views, Info.plist, build.sh changes. Host validates by installing the
+  bundle, opening the gallery and adding one widget.
+
+### Out of scope
+Interactive widgets, configurable intents, lock screen, Team ID signing, App Group.
